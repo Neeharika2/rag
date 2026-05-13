@@ -1,0 +1,6 @@
+llama-parse 
+llama-index 
+python-dotenv
+fastapi
+uvicorn
+python-multipart
