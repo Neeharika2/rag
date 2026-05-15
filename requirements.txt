@@ -4,3 +4,7 @@ python-dotenv
 fastapi
 uvicorn
 python-multipart
+langchain
+chromadb
+google-generativeai
+langgraph
