@@ -2,12 +2,20 @@ import os
 from fastapi import FastAPI, File, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 
 from injestion.graph import run_ingestion_graph
+from retrieval import hybrid_search
 
 app = FastAPI()
 
 UPLOAD_DIR = "uploads"
+
+
+class QueryRequest(BaseModel):
+    query: str
+    top_k: int = 5
+    alpha: float = 0.6
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -64,3 +72,15 @@ async def upload_pdf(file: UploadFile = File(...)) -> dict:
         "chunks": result["chunks_file"],
         "embedded": result["embedded_count"],
     }
+
+
+@app.post("/query")
+async def query_docs(payload: QueryRequest) -> dict:
+    results = await run_in_threadpool(
+        hybrid_search,
+        payload.query,
+        payload.top_k,
+        payload.alpha,
+    )
+
+    return {"ok": True, "query": payload.query, "results": results}

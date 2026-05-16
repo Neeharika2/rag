@@ -1,10 +1,12 @@
-llama-parse 
-llama-index 
+llama-parse
+llama-index
 python-dotenv
 fastapi
 uvicorn
 python-multipart
 langchain
+langchain-text-splitters
 chromadb
-google-generativeai
-langgraph
+google-genai
+pydantic>=2.0
+langgraph>=0.0.40
