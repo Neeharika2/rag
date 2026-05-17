@@ -5,11 +5,11 @@ from collections import Counter
 from typing import Dict, List, Optional
 
 import chromadb
-from google import genai
-from dotenv import load_dotenv
+from sentence_transformers import SentenceTransformer
 
 DEFAULT_DB_PATH = "db/chroma"
 DEFAULT_COLLECTION = "rag_collection"
+_MODEL_CACHE: dict[str, SentenceTransformer] = {}
 
 
 def _tokenize(text: str) -> List[str]:
@@ -62,24 +62,15 @@ def _semantic_scores(
     query: str,
     collection: chromadb.Collection,
     top_k: int,
+    model_name: str,
 ) -> Dict[str, float]:
-    load_dotenv()
-
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise ValueError("GOOGLE_API_KEY not found in .env file")
-
-    client = genai.Client(api_key=api_key)
-    response = client.models.embed_content(
-        model="text-embedding-004",
-        contents=query,
-    )
-    query_embedding = _extract_embedding(response)
+    model = _get_model(model_name)
+    query_embedding = model.encode(query, normalize_embeddings=True).tolist()
 
     result = collection.query(
         query_embeddings=[query_embedding],
         n_results=top_k,
-        include=["distances", "ids"],
+        include=["distances", "documents", "metadatas"],
     )
 
     ids = result.get("ids", [[]])[0]
@@ -97,28 +88,13 @@ def _semantic_scores(
     return {k: v / max_score for k, v in scores.items()}
 
 
-def _extract_embedding(response: object) -> list[float]:
-    if hasattr(response, "embeddings"):
-        embeddings = getattr(response, "embeddings")
-        if embeddings and hasattr(embeddings[0], "values"):
-            return list(embeddings[0].values)
-
-    if isinstance(response, dict):
-        if "embedding" in response:
-            return list(response["embedding"])
-        embeddings = response.get("embeddings") or []
-        if embeddings and isinstance(embeddings[0], dict) and "values" in embeddings[0]:
-            return list(embeddings[0]["values"])
-
-    raise ValueError("Unexpected embedding response format")
-
-
 def hybrid_search(
     query: str,
     top_k: int = 5,
     alpha: float = 0.6,
     db_path: str = DEFAULT_DB_PATH,
     collection_name: str = DEFAULT_COLLECTION,
+    model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
 ) -> List[Dict[str, object]]:
     alpha = max(0.0, min(1.0, alpha))
     os.makedirs(db_path, exist_ok=True)
@@ -126,7 +102,7 @@ def hybrid_search(
     client = chromadb.PersistentClient(path=db_path)
     collection = client.get_or_create_collection(name=collection_name)
 
-    all_data = collection.get(include=["documents", "metadatas", "ids"])
+    all_data = collection.get(include=["documents", "metadatas"])
     documents = all_data.get("documents") or []
     ids = all_data.get("ids") or []
     metadatas = all_data.get("metadatas") or [None] * len(ids)
@@ -135,7 +111,12 @@ def hybrid_search(
         return []
 
     keyword_scores = _keyword_scores(query, documents)
-    semantic_scores = _semantic_scores(query, collection, top_k=max(top_k, 10))
+    semantic_scores = _semantic_scores(
+        query,
+        collection,
+        top_k=max(top_k, 10),
+        model_name=model_name,
+    )
 
     results: List[Dict[str, object]] = []
     for idx, doc_id in enumerate(ids):
@@ -157,3 +138,11 @@ def hybrid_search(
 
     results.sort(key=lambda item: float(item["score"]), reverse=True)
     return results[:top_k]
+
+
+def _get_model(model_name: str) -> SentenceTransformer:
+    cached = _MODEL_CACHE.get(model_name)
+    if cached is None:
+        cached = SentenceTransformer(model_name)
+        _MODEL_CACHE[model_name] = cached
+    return cached

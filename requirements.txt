@@ -7,6 +7,6 @@ python-multipart
 langchain
 langchain-text-splitters
 chromadb
-google-genai
 pydantic>=2.0
 langgraph>=0.0.40
+sentence-transformers

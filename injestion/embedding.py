@@ -1,22 +1,16 @@
 import os
-from dotenv import load_dotenv
 
 import chromadb
-from google import genai
+from sentence_transformers import SentenceTransformer
 
 
 def embed_chunks(
     chunks_file: str,
     db_path: str = "db/chroma",
     collection_name: str = "rag_collection",
+    model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
 ) -> int:
-    load_dotenv()
-
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise ValueError("GOOGLE_API_KEY not found in .env file")
-
-    client = genai.Client(api_key=api_key)
+    model = SentenceTransformer(model_name)
 
     os.makedirs(db_path, exist_ok=True)
 
@@ -35,12 +29,7 @@ def embed_chunks(
             documents.append(chunk)
 
     for i, doc in enumerate(documents):
-        response = client.models.embed_content(
-            model="text-embedding-004",
-            contents=doc,
-        )
-
-        embedding = _extract_embedding(response)
+        embedding = model.encode(doc, normalize_embeddings=True).tolist()
 
         collection.add(
             ids=[str(i)],
@@ -50,22 +39,6 @@ def embed_chunks(
         )
 
     return len(documents)
-
-
-def _extract_embedding(response: object) -> list[float]:
-    if hasattr(response, "embeddings"):
-        embeddings = getattr(response, "embeddings")
-        if embeddings and hasattr(embeddings[0], "values"):
-            return list(embeddings[0].values)
-
-    if isinstance(response, dict):
-        if "embedding" in response:
-            return list(response["embedding"])
-        embeddings = response.get("embeddings") or []
-        if embeddings and isinstance(embeddings[0], dict) and "values" in embeddings[0]:
-            return list(embeddings[0]["values"])
-
-    raise ValueError("Unexpected embedding response format")
 
 
 if __name__ == "__main__":
