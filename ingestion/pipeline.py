@@ -1,19 +1,110 @@
-from typing import List, Tuple
+import json
+import os
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 
-from ingestion.chunk import chunk_file
-from ingestion.embedding import embed_chunks
-from ingestion.parser import parse_pdf
+from chunking.recursive import RecursiveChunker
+from embeddings.base import EmbeddingProvider
+from ingestion.metadata_store import MetadataStore
+from parsing.docling_parser import DoclingParser
+from vectorstore.qdrant_store import QdrantVectorStore
 
 
-def run_pipeline(pdf_path: str) -> dict:
-    parsed_file = parse_pdf(pdf_path)
-    chunks_file, chunks = chunk_file(parsed_file)
-    embedded_count = embed_chunks(chunks=chunks, source_file=pdf_path)
+def utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    return {
-        "pdf_path": pdf_path,
-        "parsed_file": parsed_file,
-        "chunks_file": chunks_file,
-        "chunks": chunks,
-        "embedded_count": embedded_count,
-    }
+
+class IngestionPipeline:
+    def __init__(
+        self,
+        parser: DoclingParser,
+        chunker: RecursiveChunker,
+        embedding_provider: EmbeddingProvider,
+        vector_store: QdrantVectorStore,
+        metadata_store: MetadataStore,
+        log_dir: Optional[str] = None,
+    ) -> None:
+        self._parser = parser
+        self._chunker = chunker
+        self._embedding_provider = embedding_provider
+        self._vector_store = vector_store
+        self._metadata_store = metadata_store
+        self._log_dir = log_dir
+
+    def ingest_file(
+        self,
+        file_path: str,
+        doc_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        doc_id = doc_id or os.path.splitext(os.path.basename(file_path))[0]
+        metadata = metadata or {}
+
+        base_metadata = {
+            "doc_id": doc_id,
+            "source": os.path.basename(file_path),
+            "uploaded_at": metadata.get("uploaded_at", utc_now()),
+            "access_level": metadata.get("access_level", "internal"),
+        }
+        base_metadata.update(metadata)
+
+        parsed = self._parser.parse(file_path, doc_id)
+        chunks = self._chunker.chunk_pages(doc_id, parsed.pages, base_metadata)
+        if not chunks:
+            self._metadata_store.upsert_document(
+                doc_id=doc_id,
+                source=os.path.basename(file_path),
+                access_level=base_metadata["access_level"],
+                metadata=base_metadata,
+            )
+            self._log_ingestion(doc_id, parsed.raw_markdown, chunks)
+            return {
+                "doc_id": doc_id,
+                "chunks_ingested": 0,
+                "source": os.path.basename(file_path),
+            }
+
+        embeddings = self._embedding_provider.embed_texts([chunk.text for chunk in chunks])
+
+        self._vector_store.upsert(embeddings, chunks)
+        self._metadata_store.upsert_document(
+            doc_id=doc_id,
+            source=os.path.basename(file_path),
+            access_level=base_metadata["access_level"],
+            metadata=base_metadata,
+        )
+        self._metadata_store.upsert_chunks(chunks)
+
+        self._log_ingestion(doc_id, parsed.raw_markdown, chunks)
+
+        return {
+            "doc_id": doc_id,
+            "chunks_ingested": len(chunks),
+            "source": os.path.basename(file_path),
+        }
+
+    def _log_ingestion(self, doc_id: str, markdown: str, chunks) -> None:
+        if not self._log_dir:
+            return
+
+        parsed_dir = os.path.join(self._log_dir, "parsed")
+        chunk_dir = os.path.join(self._log_dir, "chunks")
+        os.makedirs(parsed_dir, exist_ok=True)
+        os.makedirs(chunk_dir, exist_ok=True)
+
+        parsed_path = os.path.join(parsed_dir, f"{doc_id}.md")
+        with open(parsed_path, "w", encoding="utf-8") as f:
+            f.write(markdown)
+
+        chunk_path = os.path.join(chunk_dir, f"{doc_id}.jsonl")
+        with open(chunk_path, "w", encoding="utf-8") as f:
+            for chunk in chunks:
+                record = {
+                    "chunk_id": chunk.chunk_id,
+                    "doc_id": chunk.doc_id,
+                    "page_start": chunk.page_start,
+                    "page_end": chunk.page_end,
+                    "text": chunk.text,
+                    "metadata": chunk.metadata,
+                }
+                f.write(json.dumps(record) + "\n")

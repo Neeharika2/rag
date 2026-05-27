@@ -1,9 +1,12 @@
-llama-parse
-llama-index
+docling
+pypdf
 python-dotenv
 fastapi
 uvicorn
 python-multipart
+qdrant-client
+sqlalchemy
+psycopg2-binary
 langchain
 langchain-core
 langchain-community
