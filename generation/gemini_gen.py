@@ -4,9 +4,9 @@ from typing import List
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-load_dotenv()
+from config import GEMINI_MODEL
 
-_DEFAULT_MODEL = "gemini-2.5-flash"
+load_dotenv()
 
 
 def _configure() -> None:
@@ -16,13 +16,15 @@ def _configure() -> None:
     genai.configure(api_key=api_key)
 
 
-def generate_answer(query: str, context_docs: List[str], model_name: str = _DEFAULT_MODEL) -> str:
+def generate_answer(query: str, context_docs: List[str]) -> str:
     _configure()
-    model = genai.GenerativeModel(model_name)
+    model = genai.GenerativeModel(GEMINI_MODEL)
 
     context = "\n\n---\n\n".join(context_docs)
     prompt = (
-        "You are a helpful assistant. Use the following retrieved context to answer the question.\n\n"
+        "You are a helpful assistant that answers questions about government budgets and policy documents. "
+        "Use the following retrieved context to answer the question. "
+        "If the context does not contain enough information, say so.\n\n"
         f"Context:\n{context}\n\n"
         f"Question: {query}\n\n"
         "Answer:"

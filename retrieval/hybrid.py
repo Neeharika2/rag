@@ -2,13 +2,13 @@ import math
 import os
 import re
 from collections import Counter
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import chromadb
 from sentence_transformers import SentenceTransformer
 
-DEFAULT_DB_PATH = "db/chroma"
-DEFAULT_COLLECTION = "rag_collection"
+from config import COLLECTION_NAME, DB_PATH, EMBEDDING_MODEL
+
 _MODEL_CACHE: dict[str, SentenceTransformer] = {}
 
 
@@ -62,9 +62,8 @@ def _semantic_scores(
     query: str,
     collection: chromadb.Collection,
     top_k: int,
-    model_name: str,
 ) -> Dict[str, float]:
-    model = _get_model(model_name)
+    model = _get_model()
     query_embedding = model.encode(query, normalize_embeddings=True).tolist()
 
     result = collection.query(
@@ -92,15 +91,11 @@ def hybrid_search(
     query: str,
     top_k: int = 5,
     alpha: float = 0.6,
-    db_path: str = DEFAULT_DB_PATH,
-    collection_name: str = DEFAULT_COLLECTION,
-    model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
 ) -> List[Dict[str, object]]:
     alpha = max(0.0, min(1.0, alpha))
-    os.makedirs(db_path, exist_ok=True)
 
-    client = chromadb.PersistentClient(path=db_path)
-    collection = client.get_or_create_collection(name=collection_name)
+    client = chromadb.PersistentClient(path=DB_PATH)
+    collection = client.get_or_create_collection(name=COLLECTION_NAME)
 
     all_data = collection.get(include=["documents", "metadatas"])
     documents = all_data.get("documents") or []
@@ -111,12 +106,7 @@ def hybrid_search(
         return []
 
     keyword_scores = _keyword_scores(query, documents)
-    semantic_scores = _semantic_scores(
-        query,
-        collection,
-        top_k=max(top_k, 10),
-        model_name=model_name,
-    )
+    semantic_scores = _semantic_scores(query, collection, top_k=max(top_k, 10))
 
     results: List[Dict[str, object]] = []
     for idx, doc_id in enumerate(ids):
@@ -140,7 +130,8 @@ def hybrid_search(
     return results[:top_k]
 
 
-def _get_model(model_name: str) -> SentenceTransformer:
+def _get_model() -> SentenceTransformer:
+    model_name = EMBEDDING_MODEL
     cached = _MODEL_CACHE.get(model_name)
     if cached is None:
         cached = SentenceTransformer(model_name)

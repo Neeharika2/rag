@@ -1,10 +1,21 @@
 import os
+
 from dotenv import load_dotenv
 from llama_parse import LlamaParse
 
+from config import PARSED_DIR
 
-def parse_pdf(pdf_path: str, output_dir: str = "parsed_output") -> str:
+
+def parse_pdf(pdf_path: str) -> str:
     load_dotenv()
+
+    os.makedirs(PARSED_DIR, exist_ok=True)
+    base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+    output_file = os.path.join(PARSED_DIR, f"{base_name}.md")
+
+    if os.path.exists(output_file):
+        print(f"  Skipping parse (already exists): {output_file}")
+        return output_file
 
     api_key = os.getenv("LLAMA_PARSER_KEY")
     if not api_key:
@@ -18,19 +29,9 @@ def parse_pdf(pdf_path: str, output_dir: str = "parsed_output") -> str:
 
     documents = parser.load_data(pdf_path)
 
-    os.makedirs(output_dir, exist_ok=True)
-    base_name = os.path.splitext(os.path.basename(pdf_path))[0]
-    output_file = os.path.join(output_dir, f"{base_name}.md")
-
     with open(output_file, "w", encoding="utf-8") as f:
         for i, doc in enumerate(documents):
             f.write(f"\n\n--- Page {i + 1} ---\n\n")
             f.write(doc.text)
 
     return output_file
-
-
-if __name__ == "__main__":
-    output_file = parse_pdf("sample.pdf")
-    print("Parsing completed.")
-    print(f"Parsed file saved at: {output_file}")
