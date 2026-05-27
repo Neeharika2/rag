@@ -36,11 +36,9 @@ class Settings:
             embedding_model=os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5"),
             chunk_size=_get_env_int("CHUNK_SIZE", 700),
             chunk_overlap=_get_env_int("CHUNK_OVERLAP", 120),
-            metadata_db_url=os.getenv(
-                "METADATA_DB_URL", "sqlite:///./backend/ai_core/metadata.db"
-            ),
-            upload_dir=os.getenv("UPLOAD_DIR", "./backend/ai_core/data/uploads"),
-            log_dir=os.getenv("LOG_DIR", "./backend/ai_core/logs"),
+            metadata_db_url=os.getenv("METADATA_DB_URL", "sqlite:///./metadata.db"),
+            upload_dir=os.getenv("UPLOAD_DIR", "./uploads"),
+            log_dir=os.getenv("LOG_DIR", "./logs"),
             top_k=_get_env_int("TOP_K", 5),
         )
 

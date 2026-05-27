@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 from chunking.recursive import Chunk as TextChunk
 from ingestion.models import Base, Chunk, Document, QueryLog, RetrievalHit
@@ -38,6 +38,10 @@ class MetadataStore:
             )
             session.merge(document)
             session.commit()
+
+    def has_document(self, doc_id: str) -> bool:
+        with self._session_factory() as session:
+            return session.get(Document, doc_id) is not None
 
     def upsert_chunks(self, chunks: Iterable[TextChunk]) -> None:
         with self._session_factory() as session:

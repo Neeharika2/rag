@@ -36,9 +36,18 @@ class IngestionPipeline:
         file_path: str,
         doc_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        skip_if_exists: bool = True,
     ) -> Dict[str, Any]:
         doc_id = doc_id or os.path.splitext(os.path.basename(file_path))[0]
         metadata = metadata or {}
+
+        if skip_if_exists and self._metadata_store.has_document(doc_id):
+            return {
+                "doc_id": doc_id,
+                "chunks_ingested": 0,
+                "source": os.path.basename(file_path),
+                "skipped": True,
+            }
 
         base_metadata = {
             "doc_id": doc_id,

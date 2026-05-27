@@ -6,6 +6,8 @@ __pycache__/
 venv/
 db/
 uploads/
+logs/
+metadata.db
 parsed_output/
 chunks/
 test_chunks/

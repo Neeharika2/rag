@@ -1,3 +1,4 @@
+import uuid
 from typing import Any, Dict, Iterable, List, Optional
 
 from qdrant_client import QdrantClient
@@ -7,6 +8,7 @@ from chunking.recursive import Chunk
 
 
 class QdrantVectorStore:
+    _chunk_namespace = uuid.UUID("1a8d1b2e-6a7f-4f8b-9d53-0f6c1f4e2a3b")
     def __init__(
         self,
         url: str,
@@ -36,6 +38,7 @@ class QdrantVectorStore:
     def upsert(self, embeddings: List[List[float]], chunks: List[Chunk]) -> None:
         points: List[qdrant_models.PointStruct] = []
         for embedding, chunk in zip(embeddings, chunks):
+            point_id = uuid.uuid5(self._chunk_namespace, chunk.chunk_id)
             payload = dict(chunk.metadata)
             payload.update(
                 {
@@ -48,7 +51,7 @@ class QdrantVectorStore:
             )
             points.append(
                 qdrant_models.PointStruct(
-                    id=chunk.chunk_id,
+                    id=str(point_id),
                     vector=embedding,
                     payload=payload,
                 )
