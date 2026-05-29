@@ -2,14 +2,14 @@ from typing import Any, Dict, List, Optional
 
 from embeddings.base import EmbeddingProvider
 from evaluation.query_logger import QueryLogger
-from vectorstore.qdrant_store import QdrantVectorStore
+from vectorstore.chroma_store import ChromaVectorStore
 
 
 class Retriever:
     def __init__(
         self,
         embedding_provider: EmbeddingProvider,
-        vector_store: QdrantVectorStore,
+        vector_store: ChromaVectorStore,
         query_logger: QueryLogger,
     ) -> None:
         self._embedding_provider = embedding_provider

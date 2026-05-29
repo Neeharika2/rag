@@ -7,7 +7,7 @@ from ingestion.metadata_store import MetadataStore
 from ingestion.pipeline import IngestionPipeline
 from parsing.docling_parser import DoclingParser
 from settings import Settings
-from vectorstore.qdrant_store import QdrantVectorStore
+from vectorstore.chroma_store import ChromaVectorStore
 
 
 def _list_pdfs(upload_dir: str) -> List[str]:
@@ -26,10 +26,9 @@ def main() -> None:
     metadata_store.init_db()
 
     embedding_provider = LocalEmbeddingProvider(settings.embedding_model)
-    vector_store = QdrantVectorStore(
-        url=settings.qdrant_url,
-        collection_name=settings.qdrant_collection,
-        vector_size=embedding_provider.dimension,
+    vector_store = ChromaVectorStore(
+        persist_dir=settings.chroma_path,
+        collection_name=settings.chroma_collection,
     )
 
     parser = DoclingParser()

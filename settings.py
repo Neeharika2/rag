@@ -17,8 +17,10 @@ def _get_env_int(name: str, default: int) -> int:
 
 @dataclass
 class Settings:
-    qdrant_url: str
-    qdrant_collection: str
+    chroma_path: str
+    chroma_collection: str
+    gemini_api_key: str
+    gemini_model: str
     embedding_model: str
     chunk_size: int
     chunk_overlap: int
@@ -31,8 +33,10 @@ class Settings:
     def from_env(cls) -> "Settings":
         load_dotenv()
         return cls(
-            qdrant_url=os.getenv("QDRANT_URL", "http://localhost:6333"),
-            qdrant_collection=os.getenv("QDRANT_COLLECTION", "enterprise_docs"),
+            chroma_path=os.getenv("CHROMA_PATH", "./chroma"),
+            chroma_collection=os.getenv("CHROMA_COLLECTION", "enterprise_docs"),
+            gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
             embedding_model=os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5"),
             chunk_size=_get_env_int("CHUNK_SIZE", 700),
             chunk_overlap=_get_env_int("CHUNK_OVERLAP", 120),
@@ -45,3 +49,4 @@ class Settings:
     def ensure_dirs(self) -> None:
         os.makedirs(self.upload_dir, exist_ok=True)
         os.makedirs(self.log_dir, exist_ok=True)
+        os.makedirs(self.chroma_path, exist_ok=True)

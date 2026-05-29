@@ -7,7 +7,7 @@ from chunking.recursive import RecursiveChunker
 from embeddings.base import EmbeddingProvider
 from ingestion.metadata_store import MetadataStore
 from parsing.docling_parser import DoclingParser
-from vectorstore.qdrant_store import QdrantVectorStore
+from vectorstore.chroma_store import ChromaVectorStore
 
 
 def utc_now() -> str:
@@ -20,7 +20,7 @@ class IngestionPipeline:
         parser: DoclingParser,
         chunker: RecursiveChunker,
         embedding_provider: EmbeddingProvider,
-        vector_store: QdrantVectorStore,
+        vector_store: ChromaVectorStore,
         metadata_store: MetadataStore,
         log_dir: Optional[str] = None,
     ) -> None:

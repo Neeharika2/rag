@@ -1,0 +1,103 @@
+import uuid
+from typing import Any, Dict, List, Optional
+
+import chromadb
+
+from chunking.recursive import Chunk
+
+
+class ChromaVectorStore:
+    _chunk_namespace = uuid.UUID("1a8d1b2e-6a7f-4f8b-9d53-0f6c1f4e2a3b")
+
+    def __init__(self, persist_dir: str, collection_name: str) -> None:
+        self._client = chromadb.PersistentClient(path=persist_dir)
+        self._collection = self._client.get_or_create_collection(
+            name=collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+
+    def upsert(self, embeddings: List[List[float]], chunks: List[Chunk]) -> None:
+        ids: List[str] = []
+        metadatas: List[Dict[str, Any]] = []
+        documents: List[str] = []
+
+        for embedding, chunk in zip(embeddings, chunks):
+            chunk_id = str(uuid.uuid5(self._chunk_namespace, chunk.chunk_id))
+            metadata = dict(chunk.metadata)
+            metadata.update(
+                {
+                    "doc_id": chunk.doc_id,
+                    "chunk_id": chunk.chunk_id,
+                    "page_start": chunk.page_start,
+                    "page_end": chunk.page_end,
+                }
+            )
+            metadata = {key: value for key, value in metadata.items() if value is not None}
+            ids.append(chunk_id)
+            metadatas.append(metadata)
+            documents.append(chunk.text)
+
+        if not ids:
+            return
+
+        self._collection.upsert(
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+        )
+
+    def search(
+        self,
+        query_vector: List[float],
+        top_k: int,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        where = self._build_filter(filters)
+        result = self._collection.query(
+            query_embeddings=[query_vector],
+            n_results=top_k,
+            where=where,
+            include=["metadatas", "documents", "distances"],
+        )
+        return self._format_hits(result)
+
+    def _build_filter(self, filters: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not filters:
+            return None
+
+        where: Dict[str, Any] = {}
+        for key, value in filters.items():
+            if isinstance(value, list):
+                where[key] = {"$in": value}
+            else:
+                where[key] = value
+
+        return where or None
+
+    def _format_hits(self, result: Dict[str, Any]) -> List[Dict[str, Any]]:
+        ids = (result.get("ids") or [[]])[0]
+        metadatas = (result.get("metadatas") or [[]])[0]
+        documents = (result.get("documents") or [[]])[0]
+        distances = (result.get("distances") or [[]])[0]
+
+        hits: List[Dict[str, Any]] = []
+        for idx, hit_id in enumerate(ids):
+            metadata = metadatas[idx] or {}
+            document = documents[idx] if idx < len(documents) else ""
+            distance = distances[idx] if idx < len(distances) else None
+            score = 1.0 - float(distance) if distance is not None else 0.0
+
+            payload = dict(metadata)
+            if document:
+                payload["text"] = document
+
+            hits.append(
+                {
+                    "id": hit_id,
+                    "score": score,
+                    "payload": payload,
+                }
+            )
+
+        return hits
