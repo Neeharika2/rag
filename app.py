@@ -13,7 +13,7 @@ from generation.answerer import Answerer
 from generation.gemini import GeminiGenerator
 from ingestion.metadata_store import MetadataStore
 from ingestion.pipeline import IngestionPipeline
-from parsing.docling_parser import DoclingParser
+from parsing.multimodal_parser import MultiModalParser
 from retrieval.retriever import Retriever
 from settings import Settings
 from vectorstore.chroma_store import ChromaVectorStore
@@ -30,7 +30,10 @@ vector_store = ChromaVectorStore(
     collection_name=settings.chroma_collection,
 )
 
-parser = DoclingParser()
+parser = MultiModalParser(
+    ocr_enabled=settings.ocr_enabled,
+    tesseract_cmd=settings.tesseract_cmd,
+)
 chunker = RecursiveChunker(
     chunk_size=settings.chunk_size,
     chunk_overlap=settings.chunk_overlap,
@@ -211,6 +214,14 @@ class IngestResponse(BaseModel):
 async def ingest_document(file: UploadFile = File(...)) -> IngestResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename")
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    allowed_extensions = {
+        ".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff",
+        ".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac", ".mp4"
+    }
+    if ext not in allowed_extensions:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
 
     safe_name = os.path.basename(file.filename)
     target_path = os.path.join(settings.upload_dir, safe_name)

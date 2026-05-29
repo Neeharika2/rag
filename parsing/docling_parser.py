@@ -1,46 +1,51 @@
 import os
 import re
-from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
 
-from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.document_converter import DocumentConverter, PdfFormatOption, ImageFormatOption, AudioFormatOption
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.datamodel.pipeline_options import PdfPipelineOptions, AsrPipelineOptions
+from docling.pipeline.asr_pipeline import AsrPipeline
+from docling.datamodel import asr_model_specs
 
-
-@dataclass
-class PageContent:
-    page_number: Optional[int]
-    text: str
-
-
-@dataclass
-class ParsedDocument:
-    doc_id: str
-    source_path: str
-    source_name: str
-    pages: List[PageContent]
-    raw_markdown: str
+from parsing.models import PageContent, ParsedDocument
 
 
 class DoclingParser:
-    def __init__(self) -> None:
+    def __init__(self, ocr_enabled: bool = True) -> None:
         pipeline_options = PdfPipelineOptions()
-        pipeline_options.do_ocr = False
+        pipeline_options.do_ocr = ocr_enabled
         pipeline_options.do_table_structure = True
         pipeline_options.images_scale = 1
         pipeline_options.generate_page_images = False
 
+        asr_pipeline_options = AsrPipelineOptions()
+        asr_pipeline_options.asr_options = asr_model_specs.WHISPER_TURBO
+
         self._converter = DocumentConverter(
-            allowed_formats=[InputFormat.PDF],
+            allowed_formats=[InputFormat.PDF, InputFormat.IMAGE, InputFormat.AUDIO],
             format_options={
                 InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
+                InputFormat.IMAGE: ImageFormatOption(pipeline_options=pipeline_options),
+                InputFormat.AUDIO: AudioFormatOption(
+                    pipeline_cls=AsrPipeline,
+                    pipeline_options=asr_pipeline_options,
+                ),
             },
         )
 
     def parse(self, file_path: str, doc_id: str) -> ParsedDocument:
-        if not file_path.lower().endswith(".pdf"):
-            raise ValueError("Docling parser currently supports PDF files only")
+        ext = os.path.splitext(file_path)[1].lower()
+        supported = {
+            # PDF
+            ".pdf",
+            # Image
+            ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff",
+            # Audio / Video
+            ".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac", ".mp4"
+        }
+        if ext not in supported:
+            raise ValueError(f"Docling parser does not support {ext} files")
         result = self._converter.convert(file_path)
         document = result.document
         markdown = document.export_to_markdown()

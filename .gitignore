@@ -12,3 +12,10 @@ parsed_output/
 chunks/
 test_chunks/
 
+# Databases & Vector Stores
+chroma/
+*.db
+
+# IDEs & Editors
+.vscode/
+.idea/

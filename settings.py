@@ -15,6 +15,13 @@ def _get_env_int(name: str, default: int) -> int:
         return default
 
 
+def _get_env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 @dataclass
 class Settings:
     chroma_path: str
@@ -28,6 +35,8 @@ class Settings:
     upload_dir: str
     log_dir: str
     top_k: int
+    ocr_enabled: bool
+    tesseract_cmd: Optional[str]
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -44,6 +53,8 @@ class Settings:
             upload_dir=os.getenv("UPLOAD_DIR", "./uploads"),
             log_dir=os.getenv("LOG_DIR", "./logs"),
             top_k=_get_env_int("TOP_K", 5),
+            ocr_enabled=_get_env_bool("OCR_ENABLED", True),
+            tesseract_cmd=os.getenv("TESSERACT_CMD"),
         )
 
     def ensure_dirs(self) -> None:

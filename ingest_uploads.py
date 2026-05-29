@@ -5,15 +5,19 @@ from chunking.recursive import RecursiveChunker
 from embeddings.local import LocalEmbeddingProvider
 from ingestion.metadata_store import MetadataStore
 from ingestion.pipeline import IngestionPipeline
-from parsing.docling_parser import DoclingParser
+from parsing.multimodal_parser import MultiModalParser
 from settings import Settings
 from vectorstore.chroma_store import ChromaVectorStore
 
 
-def _list_pdfs(upload_dir: str) -> List[str]:
+def _list_assets(upload_dir: str) -> List[str]:
+    allowed = {
+        ".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff",
+        ".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac", ".mp4"
+    }
     paths: List[str] = []
     for name in os.listdir(upload_dir):
-        if name.lower().endswith(".pdf"):
+        if os.path.splitext(name)[1].lower() in allowed:
             paths.append(os.path.join(upload_dir, name))
     return sorted(paths)
 
@@ -31,7 +35,10 @@ def main() -> None:
         collection_name=settings.chroma_collection,
     )
 
-    parser = DoclingParser()
+    parser = MultiModalParser(
+        ocr_enabled=settings.ocr_enabled,
+        tesseract_cmd=settings.tesseract_cmd,
+    )
     chunker = RecursiveChunker(
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
@@ -46,21 +53,21 @@ def main() -> None:
         log_dir=settings.log_dir,
     )
 
-    pdfs = _list_pdfs(settings.upload_dir)
-    if not pdfs:
-        print(f"No PDFs found in {settings.upload_dir}")
+    assets = _list_assets(settings.upload_dir)
+    if not assets:
+        print(f"No supported files found in {settings.upload_dir}")
         return
 
     summary: Dict[str, int] = {"ingested": 0, "skipped": 0}
-    for pdf_path in pdfs:
-        result = pipeline.ingest_file(pdf_path, skip_if_exists=True)
+    for asset_path in assets:
+        result = pipeline.ingest_file(asset_path, skip_if_exists=True)
         if result.get("skipped"):
             summary["skipped"] += 1
-            print(f"Skipped: {os.path.basename(pdf_path)}")
+            print(f"Skipped: {os.path.basename(asset_path)}")
         else:
             summary["ingested"] += 1
             print(
-                f"Ingested: {os.path.basename(pdf_path)} "
+                f"Ingested: {os.path.basename(asset_path)} "
                 f"({result['chunks_ingested']} chunks)"
             )
 

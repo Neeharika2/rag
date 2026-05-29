@@ -3,7 +3,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
-from parsing.docling_parser import PageContent
+from parsing.models import PageContent
 
 
 @dataclass

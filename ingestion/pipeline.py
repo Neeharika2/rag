@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 from chunking.recursive import RecursiveChunker
 from embeddings.base import EmbeddingProvider
 from ingestion.metadata_store import MetadataStore
-from parsing.docling_parser import DoclingParser
+from parsing.base import DocumentParser
 from vectorstore.chroma_store import ChromaVectorStore
 
 
@@ -17,7 +17,7 @@ def utc_now() -> str:
 class IngestionPipeline:
     def __init__(
         self,
-        parser: DoclingParser,
+        parser: DocumentParser,
         chunker: RecursiveChunker,
         embedding_provider: EmbeddingProvider,
         vector_store: ChromaVectorStore,
