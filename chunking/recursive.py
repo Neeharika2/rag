@@ -21,6 +21,8 @@ class RecursiveChunker:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.separators = ["\n\n", "\n", ". ", " ", ""]
+        import tiktoken
+        self._encoder = tiktoken.get_encoding("cl100k_base")
 
     def chunk_pages(
         self,
@@ -124,8 +126,8 @@ class RecursiveChunker:
     def _estimate_tokens(self, text: str) -> int:
         return len(self._tokenize(text))
 
-    def _tokenize(self, text: str) -> List[str]:
-        return re.findall(r"\w+|[^\w\s]", text)
+    def _tokenize(self, text: str) -> List[int]:
+        return self._encoder.encode(text, disallowed_special=())
 
-    def _detokenize(self, tokens: List[str]) -> str:
-        return " ".join(tokens)
+    def _detokenize(self, tokens: List[int]) -> str:
+        return self._encoder.decode(tokens)

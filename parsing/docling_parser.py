@@ -15,7 +15,7 @@ class DoclingParser:
     def __init__(self, ocr_enabled: bool = True) -> None:
         pipeline_options = PdfPipelineOptions()
         pipeline_options.do_ocr = ocr_enabled
-        pipeline_options.do_table_structure = True
+        pipeline_options.do_table_structure = ocr_enabled
         pipeline_options.images_scale = 1
         pipeline_options.generate_page_images = False
 
@@ -46,11 +46,26 @@ class DoclingParser:
         }
         if ext not in supported:
             raise ValueError(f"Docling parser does not support {ext} files")
-        result = self._converter.convert(file_path)
-        document = result.document
-        markdown = document.export_to_markdown()
+        try:
+            result = self._converter.convert(file_path)
+            document = result.document
+            markdown = document.export_to_markdown(page_break_placeholder="<!-- PAGE_BREAK -->")
+            pages = self._extract_pages(document, markdown)
+        except BaseException as e:
+            if ext == ".pdf":
+                print(f"Docling failed or ran out of memory: {e}. Falling back to PyPDF...")
+                import pypdf
+                pages = []
+                with open(file_path, "rb") as f:
+                    reader = pypdf.PdfReader(f)
+                    for index, page in enumerate(reader.pages):
+                        text = page.extract_text()
+                        if text and text.strip():
+                            pages.append(PageContent(page_number=index + 1, text=text.strip()))
+                markdown = "\n\n<!-- PAGE_BREAK -->\n\n".join([p.text for p in pages])
+            else:
+                raise e
 
-        pages = self._extract_pages(document, markdown)
         if not pages:
             pages = [PageContent(page_number=1, text=markdown)]
 
@@ -64,26 +79,9 @@ class DoclingParser:
 
     def _extract_pages(self, document, markdown: str) -> List[PageContent]:
         pages: List[PageContent] = []
-
-        if hasattr(document, "pages"):
-            for index, page in enumerate(document.pages):
-                text = getattr(page, "text", None)
-                if not text and hasattr(page, "export_to_text"):
-                    text = page.export_to_text()
-                if not text and hasattr(page, "get_text"):
-                    text = page.get_text()
-                if text and text.strip():
-                    pages.append(PageContent(page_number=index + 1, text=text))
-
-        if pages:
-            return pages
-
-        page_matches = re.split(r"--- Page (\d+) ---", markdown)
-        if len(page_matches) > 1:
-            for i in range(1, len(page_matches), 2):
-                page_number = int(page_matches[i])
-                text = page_matches[i + 1].strip()
-                if text:
-                    pages.append(PageContent(page_number=page_number, text=text))
-
+        page_chunks = markdown.split("<!-- PAGE_BREAK -->")
+        for index, text in enumerate(page_chunks):
+            text_str = text.strip()
+            if text_str:
+                pages.append(PageContent(page_number=index + 1, text=text_str))
         return pages

@@ -21,11 +21,17 @@ class Retriever:
         query: str,
         top_k: int,
         filters: Optional[Dict[str, Any]] = None,
+        original_query: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         query_vector = self._embedding_provider.embed_query(query)
         hits = self._vector_store.search(query_vector, top_k, filters)
 
-        query_id = self._query_logger.log_query(query, filters, top_k)
+        log_query_text = original_query if original_query is not None else query
+        log_filters = filters.copy() if filters else {}
+        if original_query is not None and original_query != query:
+            log_filters["rewritten_query"] = query
+
+        query_id = self._query_logger.log_query(log_query_text, log_filters, top_k)
         self._query_logger.log_hits(query_id, hits)
 
         results = []

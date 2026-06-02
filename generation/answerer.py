@@ -2,23 +2,45 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from retrieval.retriever import Retriever
 from generation.base import AnswerGenerator
+from agents.query_rewriter import QueryRewriter
 
 
 class Answerer:
-    def __init__(self, retriever: Retriever, generator: AnswerGenerator) -> None:
+    def __init__(
+        self,
+        retriever: Retriever,
+        generator: AnswerGenerator,
+        query_rewriter: Optional[QueryRewriter] = None,
+    ) -> None:
         self._retriever = retriever
         self._generator = generator
+        self._query_rewriter = query_rewriter
 
     def answer(
         self,
         query: str,
         top_k: int,
         filters: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[str, List[Dict[str, Any]]]:
-        hits = self._retriever.retrieve(query=query, top_k=top_k, filters=filters)
+        rewrite: bool = False,
+    ) -> Tuple[str, List[Dict[str, Any]], Optional[str]]:
+        rewritten_query = None
+        search_query = query
+        if rewrite and self._query_rewriter:
+            rewritten_query = self._query_rewriter.rewrite(query)
+            if rewritten_query != query:
+                search_query = rewritten_query
+            else:
+                rewritten_query = None
+
+        hits = self._retriever.retrieve(
+            query=search_query,
+            top_k=top_k,
+            filters=filters,
+            original_query=query if rewrite else None,
+        )
         prompt = self._build_prompt(query, hits)
         answer = self._generator.generate(prompt)
-        return answer, hits
+        return answer, hits, rewritten_query
 
     def _build_prompt(self, query: str, hits: List[Dict[str, Any]]) -> str:
         if hits:

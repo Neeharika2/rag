@@ -2,7 +2,7 @@ import os
 from typing import Dict, List
 
 from chunking.recursive import RecursiveChunker
-from embeddings.local import LocalEmbeddingProvider
+from embeddings.gemini import GeminiEmbeddingProvider
 from ingestion.metadata_store import MetadataStore
 from ingestion.pipeline import IngestionPipeline
 from parsing.multimodal_parser import MultiModalParser
@@ -29,7 +29,11 @@ def main() -> None:
     metadata_store = MetadataStore(settings.metadata_db_url)
     metadata_store.init_db()
 
-    embedding_provider = LocalEmbeddingProvider(settings.embedding_model)
+    embedding_provider = GeminiEmbeddingProvider(
+        api_key=settings.gemini_api_key,
+        model_name=settings.embedding_model,
+        dimension=3072,
+    )
     vector_store = ChromaVectorStore(
         persist_dir=settings.chroma_path,
         collection_name=settings.chroma_collection,

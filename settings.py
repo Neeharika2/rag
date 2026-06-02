@@ -37,6 +37,7 @@ class Settings:
     top_k: int
     ocr_enabled: bool
     tesseract_cmd: Optional[str]
+    rewrite_query_by_default: bool
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -46,15 +47,16 @@ class Settings:
             chroma_collection=os.getenv("CHROMA_COLLECTION", "enterprise_docs"),
             gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
             gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-            embedding_model=os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5"),
-            chunk_size=_get_env_int("CHUNK_SIZE", 700),
-            chunk_overlap=_get_env_int("CHUNK_OVERLAP", 120),
+            embedding_model=os.getenv("EMBEDDING_MODEL", "models/gemini-embedding-2"),
+            chunk_size=_get_env_int("CHUNK_SIZE", 1500),
+            chunk_overlap=_get_env_int("CHUNK_OVERLAP", 200),
             metadata_db_url=os.getenv("METADATA_DB_URL", "sqlite:///./metadata.db"),
             upload_dir=os.getenv("UPLOAD_DIR", "./uploads"),
             log_dir=os.getenv("LOG_DIR", "./logs"),
             top_k=_get_env_int("TOP_K", 5),
-            ocr_enabled=_get_env_bool("OCR_ENABLED", True),
+            ocr_enabled=_get_env_bool("OCR_ENABLED", False),
             tesseract_cmd=os.getenv("TESSERACT_CMD"),
+            rewrite_query_by_default=_get_env_bool("REWRITE_QUERY_BY_DEFAULT", False),
         )
 
     def ensure_dirs(self) -> None:
