@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 from typing import Any, Dict, List, Optional
@@ -6,6 +7,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from agents.query_rewriter import QueryRewriter
 from chunking.recursive import RecursiveChunker
 from embeddings.gemini import GeminiEmbeddingProvider
 from evaluation.query_logger import QueryLogger
@@ -14,13 +16,16 @@ from generation.gemini import GeminiGenerator
 from ingestion.metadata_store import MetadataStore
 from ingestion.pipeline import IngestionPipeline
 from parsing.multimodal_parser import MultiModalParser
+from parsing.structured_log import configure_parse_logging, get_parse_events
 from retrieval.retriever import Retriever
 from settings import Settings
 from vectorstore.chroma_store import ChromaVectorStore
-from agents.query_rewriter import QueryRewriter
 
 settings = Settings.from_env()
 settings.ensure_dirs()
+
+configure_parse_logging(log_dir=os.path.join(settings.log_dir, "parsing"), level=settings.log_level)
+logger = logging.getLogger(__name__)
 
 metadata_store = MetadataStore(settings.metadata_db_url)
 metadata_store.init_db()
@@ -123,25 +128,19 @@ def index() -> str:
             const answerEl = document.getElementById("answer");
             const citationsEl = document.getElementById("citations");
             const errorEl = document.getElementById("error");
-
-            // Set default checked state from settings
             rewriteEl.checked = {default_rewrite};
-
             function show(el, html) {
                 el.style.display = "block";
                 el.innerHTML = html;
             }
-
             function hide(el) {
                 el.style.display = "none";
                 el.innerHTML = "";
             }
-
             askBtn.addEventListener("click", async () => {
                 hide(errorEl);
                 hide(answerEl);
                 hide(citationsEl);
-
                 const query = queryEl.value.trim();
                 const topK = Number(topKEl.value || 5);
                 const rewrite = rewriteEl.checked;
@@ -149,32 +148,36 @@ def index() -> str:
                     show(errorEl, "Please enter a question.");
                     return;
                 }
-
                 askBtn.disabled = true;
                 askBtn.textContent = "Asking...";
-
                 try {
                     const response = await fetch("/answer", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ query, top_k: topK, filters: null, rewrite })
                     });
-
                     if (!response.ok) {
                         const text = await response.text();
                         show(errorEl, `Request failed: ${response.status} ${text}`);
                         return;
                     }
-
                     const data = await response.json();
                     const rewriteBadge = data.rewritten_query ? `<div class="badge">Rewritten to: "<em>${data.rewritten_query}</em>"</div>` : "";
                     show(answerEl, `<h3>Answer</h3>${rewriteBadge}<pre>${data.answer || ""}</pre>`);
-
                     const citations = (data.citations || []).map((c, idx) => {
                         const header = `[${idx + 1}] ${c.doc_id || ""} / ${c.chunk_id || ""}`;
-                        return `<div style="margin-bottom: 0.75rem;"><div><strong>${header}</strong></div><div class="muted">Score: ${c.score}</div><pre>${c.text || ""}</pre></div>`;
+                        let detail = `<div><strong>${header}</strong></div><div class="muted">Score: ${c.score}</div>`;
+                        if (c.provenance) {
+                            const p = c.provenance;
+                            detail += `<div class="muted">Page: ${p.page_number || "?"}`;
+                            if (p.bbox) detail += ` | BBox: (${p.bbox.left}, ${p.bbox.top}, ${p.bbox.right}, ${p.bbox.bottom})`;
+                            if (p.tables && p.tables.length) detail += ` | Tables: ${p.tables.length}`;
+                            if (p.images && p.images.length) detail += ` | Images: ${p.images.length}`;
+                            detail += "</div>";
+                        }
+                        detail += `<pre>${c.text || ""}</pre>`;
+                        return `<div style="margin-bottom: 0.75rem;">${detail}</div>`;
                     }).join("");
-
                     show(citationsEl, `<h3>Citations</h3>${citations || "No citations."}`);
                 } catch (err) {
                     show(errorEl, `Error: ${err}`);
@@ -187,7 +190,10 @@ def index() -> str:
     </body>
     </html>
     """
-    return html_content.replace("{default_rewrite}", "true" if settings.rewrite_query_by_default else "false")
+    return html_content.replace(
+        "{default_rewrite}",
+        "true" if settings.rewrite_query_by_default else "false",
+    )
 
 
 class RetrieveRequest(BaseModel):
@@ -217,11 +223,19 @@ class AnswerRequest(BaseModel):
     rewrite: Optional[bool] = None
 
 
+class ProvenanceDetail(BaseModel):
+    page_number: Optional[int] = None
+    bbox: Optional[Dict[str, float]] = None
+    tables: Optional[List[Dict[str, Any]]] = None
+    images: Optional[List[Dict[str, Any]]] = None
+
+
 class Citation(BaseModel):
     chunk_id: str
     doc_id: str
     score: float
     text: str
+    provenance: Optional[ProvenanceDetail] = None
 
 
 class AnswerResponse(BaseModel):
@@ -244,7 +258,7 @@ async def ingest_document(file: UploadFile = File(...)) -> IngestResponse:
     ext = os.path.splitext(file.filename)[1].lower()
     allowed_extensions = {
         ".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff",
-        ".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac", ".mp4"
+        ".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac", ".mp4",
     }
     if ext not in allowed_extensions:
         raise HTTPException(status_code=400, detail="Unsupported file type")
@@ -268,8 +282,12 @@ async def ingest_document(file: UploadFile = File(...)) -> IngestResponse:
 
 @app.post("/retrieve", response_model=RetrieveResponse)
 def retrieve(request: RetrieveRequest) -> RetrieveResponse:
-    should_rewrite = request.rewrite if request.rewrite is not None else settings.rewrite_query_by_default
-    
+    should_rewrite = (
+        request.rewrite
+        if request.rewrite is not None
+        else settings.rewrite_query_by_default
+    )
+
     rewritten_query = None
     search_query = request.query
     if should_rewrite and query_rewriter:
@@ -288,10 +306,26 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
     return RetrieveResponse(results=results, rewritten_query=rewritten_query)
 
 
+def _extract_provenance_from_metadata(metadata: Dict[str, Any]) -> Optional[ProvenanceDetail]:
+    prov = metadata.get("provenance")
+    if not prov:
+        return None
+    return ProvenanceDetail(
+        page_number=prov.get("page_number"),
+        bbox=prov.get("bbox"),
+        tables=prov.get("tables"),
+        images=prov.get("images"),
+    )
+
+
 @app.post("/answer", response_model=AnswerResponse)
 def answer(request: AnswerRequest) -> AnswerResponse:
-    should_rewrite = request.rewrite if request.rewrite is not None else settings.rewrite_query_by_default
-    
+    should_rewrite = (
+        request.rewrite
+        if request.rewrite is not None
+        else settings.rewrite_query_by_default
+    )
+
     answer_text, hits, rewritten_query = answerer.answer(
         query=request.query,
         top_k=request.top_k,
@@ -300,12 +334,23 @@ def answer(request: AnswerRequest) -> AnswerResponse:
     )
     citations: List[Citation] = []
     for hit in hits:
+        metadata = hit.get("metadata", {})
         citations.append(
             Citation(
                 chunk_id=hit.get("chunk_id", hit.get("id", "")),
                 doc_id=hit.get("doc_id", ""),
                 score=hit.get("score", 0.0),
                 text=hit.get("text", ""),
+                provenance=_extract_provenance_from_metadata(metadata),
             )
         )
-    return AnswerResponse(answer=answer_text, citations=citations, rewritten_query=rewritten_query)
+    return AnswerResponse(
+        answer=answer_text,
+        citations=citations,
+        rewritten_query=rewritten_query,
+    )
+
+
+@app.get("/ops/parse-events")
+def list_parse_events():
+    return get_parse_events()

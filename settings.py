@@ -38,6 +38,7 @@ class Settings:
     ocr_enabled: bool
     tesseract_cmd: Optional[str]
     rewrite_query_by_default: bool
+    log_level: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -57,6 +58,7 @@ class Settings:
             ocr_enabled=_get_env_bool("OCR_ENABLED", False),
             tesseract_cmd=os.getenv("TESSERACT_CMD"),
             rewrite_query_by_default=_get_env_bool("REWRITE_QUERY_BY_DEFAULT", False),
+            log_level=os.getenv("LOG_LEVEL", "INFO"),
         )
 
     def ensure_dirs(self) -> None:

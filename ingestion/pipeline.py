@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -7,7 +8,10 @@ from chunking.recursive import RecursiveChunker
 from embeddings.base import EmbeddingProvider
 from ingestion.metadata_store import MetadataStore
 from parsing.base import DocumentParser
+from parsing.structured_log import ParseEvent, track_parse
 from vectorstore.chroma_store import ChromaVectorStore
+
+logger = logging.getLogger(__name__)
 
 
 def utc_now() -> str:
@@ -42,6 +46,7 @@ class IngestionPipeline:
         metadata = metadata or {}
 
         if skip_if_exists and self._metadata_store.has_document(doc_id):
+            logger.info("Skipping %s (already exists)", doc_id)
             return {
                 "doc_id": doc_id,
                 "chunks_ingested": 0,
@@ -57,8 +62,10 @@ class IngestionPipeline:
         }
         base_metadata.update(metadata)
 
-        parsed = self._parser.parse(file_path, doc_id)
-        chunks = self._chunker.chunk_pages(doc_id, parsed.pages, base_metadata)
+        with track_parse(doc_id, file_path, "ingestion_pipeline"):
+            parsed = self._parser.parse(file_path, doc_id)
+            chunks = self._chunker.chunk_pages(doc_id, parsed.pages, base_metadata)
+
         if not chunks:
             self._metadata_store.upsert_document(
                 doc_id=doc_id,
@@ -67,13 +74,16 @@ class IngestionPipeline:
                 metadata=base_metadata,
             )
             self._log_ingestion(doc_id, parsed.raw_markdown, chunks)
+            logger.warning("No chunks generated for %s", doc_id)
             return {
                 "doc_id": doc_id,
                 "chunks_ingested": 0,
                 "source": os.path.basename(file_path),
             }
 
-        embeddings = self._embedding_provider.embed_texts([chunk.text for chunk in chunks])
+        embeddings = self._embedding_provider.embed_texts(
+            [chunk.text for chunk in chunks]
+        )
 
         self._vector_store.upsert(embeddings, chunks)
         self._metadata_store.upsert_document(
@@ -85,6 +95,11 @@ class IngestionPipeline:
         self._metadata_store.upsert_chunks(chunks)
 
         self._log_ingestion(doc_id, parsed.raw_markdown, chunks)
+
+        logger.info(
+            "Ingested %s: %d chunks, %d pages",
+            doc_id, len(chunks), len(parsed.pages),
+        )
 
         return {
             "doc_id": doc_id,

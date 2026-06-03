@@ -46,6 +46,45 @@ class RecursiveChunker:
                 if page.page_number is not None:
                     metadata["page"] = str(page.page_number)
 
+                if page.provenance is not None:
+                    provenance_dict: Dict[str, Any] = {
+                        "page_number": page.provenance.page_number,
+                    }
+                    if page.provenance.bbox is not None:
+                        provenance_dict["bbox"] = {
+                            "left": page.provenance.bbox.left,
+                            "top": page.provenance.bbox.top,
+                            "right": page.provenance.bbox.right,
+                            "bottom": page.provenance.bbox.bottom,
+                        }
+                    if page.provenance.tables:
+                        provenance_dict["tables"] = [
+                            {
+                                "page_number": t.page_number,
+                                "bbox": {
+                                    "left": t.bbox.left,
+                                    "top": t.bbox.top,
+                                    "right": t.bbox.right,
+                                    "bottom": t.bbox.bottom,
+                                },
+                            }
+                            for t in page.provenance.tables
+                        ]
+                    if page.provenance.images:
+                        provenance_dict["images"] = [
+                            {
+                                "page_number": im.page_number,
+                                "bbox": {
+                                    "left": im.bbox.left,
+                                    "top": im.bbox.top,
+                                    "right": im.bbox.right,
+                                    "bottom": im.bbox.bottom,
+                                },
+                            }
+                            for im in page.provenance.images
+                        ]
+                    metadata["provenance"] = provenance_dict
+
                 chunks.append(
                     Chunk(
                         chunk_id=chunk_id,
@@ -118,7 +157,7 @@ class RecursiveChunker:
         overlapped = [chunks[0]]
         for idx in range(1, len(chunks)):
             prev_tokens = self._tokenize(chunks[idx - 1])
-            overlap_tokens = prev_tokens[-self.chunk_overlap :]
+            overlap_tokens = prev_tokens[-self.chunk_overlap:]
             merged = self._detokenize(overlap_tokens) + " " + chunks[idx]
             overlapped.append(merged.strip())
         return overlapped
