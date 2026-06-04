@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
@@ -8,6 +9,9 @@ from sqlalchemy.orm import sessionmaker
 
 from chunking.recursive import Chunk as TextChunk
 from ingestion.models import Base, Chunk, Document, QueryLog, RetrievalHit
+from placement.models import PlacementDataset
+
+logger = logging.getLogger(__name__)
 
 
 def utc_now() -> datetime:
@@ -89,3 +93,42 @@ class MetadataStore:
                 )
                 session.add(row)
             session.commit()
+
+    def upsert_placement_dataset(self, doc_id: str, dataset: PlacementDataset) -> None:
+        with self._session_factory() as session:
+            document = session.get(Document, doc_id)
+            if document is None:
+                logger.warning("Document %s not found; cannot attach placement dataset", doc_id)
+                return
+            existing = json.loads(document.metadata_json or "{}")
+            existing["placement_dataset"] = dataset.model_dump(mode="json")
+            document.metadata_json = json.dumps(existing)
+            session.commit()
+            logger.info("Attached placement dataset to document %s", doc_id)
+
+    def get_latest_placement_dataset(self) -> Optional[PlacementDataset]:
+        with self._session_factory() as session:
+            document = (
+                session.query(Document)
+                .filter(Document.metadata_json.like('%placement_dataset%'))
+                .order_by(Document.uploaded_at.desc())
+                .first()
+            )
+            if document is None:
+                return None
+            metadata = json.loads(document.metadata_json or "{}")
+            data = metadata.get("placement_dataset")
+            if data is None:
+                return None
+            return PlacementDataset.model_validate(data)
+
+    def get_placement_dataset(self, doc_id: str) -> Optional[PlacementDataset]:
+        with self._session_factory() as session:
+            document = session.get(Document, doc_id)
+            if document is None:
+                return None
+            metadata = json.loads(document.metadata_json or "{}")
+            data = metadata.get("placement_dataset")
+            if data is None:
+                return None
+            return PlacementDataset.model_validate(data)

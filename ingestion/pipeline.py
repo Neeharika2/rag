@@ -9,9 +9,12 @@ from embeddings.base import EmbeddingProvider
 from ingestion.metadata_store import MetadataStore
 from parsing.base import DocumentParser
 from parsing.structured_log import ParseEvent, track_parse
+from placement.extractor import extract_all
 from vectorstore.chroma_store import ChromaVectorStore
 
 logger = logging.getLogger(__name__)
+
+PLACEMENT_PDF_PREFIXES = ("placement", "Placement_RAG", "placement_rag")
 
 
 def utc_now() -> str:
@@ -66,6 +69,34 @@ class IngestionPipeline:
             parsed = self._parser.parse(file_path, doc_id)
             chunks = self._chunker.chunk_pages(doc_id, parsed.pages, base_metadata)
 
+        is_placement = self._is_placement_pdf(doc_id, file_path)
+
+        if is_placement and parsed.raw_markdown:
+            try:
+                dataset = extract_all(parsed.raw_markdown)
+                base_metadata["has_placement_data"] = True
+                base_metadata["eligibility_count"] = len(dataset.eligibility_profiles)
+                base_metadata["hiring_count"] = len(dataset.hiring_distributions)
+                base_metadata["interview_count"] = len(dataset.interview_experiences)
+                base_metadata["trend_count"] = len(dataset.placement_trends)
+                base_metadata["conflict_count"] = len(dataset.conflict_records)
+                base_metadata["stats_count"] = len(dataset.overall_stats)
+                logger.info(
+                    "Placement dataset extracted: %d eligibility, %d hiring, %d interviews, "
+                    "%d trends, %d conflicts, %d stats",
+                    len(dataset.eligibility_profiles),
+                    len(dataset.hiring_distributions),
+                    len(dataset.interview_experiences),
+                    len(dataset.placement_trends),
+                    len(dataset.conflict_records),
+                    len(dataset.overall_stats),
+                )
+            except Exception as exc:
+                logger.error("Placement extraction failed for %s: %s", doc_id, exc)
+                dataset = None
+        else:
+            dataset = None
+
         if not chunks:
             self._metadata_store.upsert_document(
                 doc_id=doc_id,
@@ -73,6 +104,8 @@ class IngestionPipeline:
                 access_level=base_metadata["access_level"],
                 metadata=base_metadata,
             )
+            if dataset is not None:
+                self._metadata_store.upsert_placement_dataset(doc_id, dataset)
             self._log_ingestion(doc_id, parsed.raw_markdown, chunks)
             logger.warning("No chunks generated for %s", doc_id)
             return {
@@ -94,6 +127,9 @@ class IngestionPipeline:
         )
         self._metadata_store.upsert_chunks(chunks)
 
+        if dataset is not None:
+            self._metadata_store.upsert_placement_dataset(doc_id, dataset)
+
         self._log_ingestion(doc_id, parsed.raw_markdown, chunks)
 
         logger.info(
@@ -106,6 +142,18 @@ class IngestionPipeline:
             "chunks_ingested": len(chunks),
             "source": os.path.basename(file_path),
         }
+
+    @staticmethod
+    def _is_placement_pdf(doc_id: str, file_path: str) -> bool:
+        name = os.path.basename(file_path)
+        lower_name = name.lower()
+        lower_id = doc_id.lower()
+        for prefix in PLACEMENT_PDF_PREFIXES:
+            if lower_name.startswith(prefix.lower()) or lower_id.startswith(prefix.lower()):
+                return True
+        if "placement" in lower_name or "placement" in lower_id:
+            return True
+        return False
 
     def _log_ingestion(self, doc_id: str, markdown: str, chunks) -> None:
         if not self._log_dir:

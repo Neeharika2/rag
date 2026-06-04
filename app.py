@@ -17,6 +17,7 @@ from ingestion.metadata_store import MetadataStore
 from ingestion.pipeline import IngestionPipeline
 from parsing.multimodal_parser import MultiModalParser
 from parsing.structured_log import configure_parse_logging, get_parse_events
+from placement.models import PlacementDataset
 from retrieval.retriever import Retriever
 from settings import Settings
 from vectorstore.chroma_store import ChromaVectorStore
@@ -355,3 +356,14 @@ def answer(request: AnswerRequest) -> AnswerResponse:
 @app.get("/ops/parse-events")
 def list_parse_events():
     return get_parse_events()
+
+
+@app.get("/placement/facts")
+def get_placement_facts(doc_id: Optional[str] = None):
+    if doc_id:
+        dataset = metadata_store.get_placement_dataset(doc_id)
+    else:
+        dataset = metadata_store.get_latest_placement_dataset()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="No placement dataset found")
+    return dataset.model_dump(mode="json")
