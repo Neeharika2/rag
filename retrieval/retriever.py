@@ -11,10 +11,12 @@ class Retriever:
         embedding_provider: EmbeddingProvider,
         vector_store: ChromaVectorStore,
         query_logger: QueryLogger,
+        min_score: float = 0.0,
     ) -> None:
         self._embedding_provider = embedding_provider
         self._vector_store = vector_store
         self._query_logger = query_logger
+        self._min_score = min_score
 
     def retrieve(
         self,
@@ -36,6 +38,8 @@ class Retriever:
 
         results = []
         for hit in hits:
+            if hit["score"] < self._min_score:
+                continue
             payload = hit.get("payload", {})
             results.append(
                 {

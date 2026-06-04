@@ -60,6 +60,7 @@ retriever = Retriever(
     embedding_provider=embedding_provider,
     vector_store=vector_store,
     query_logger=query_logger,
+    min_score=settings.retrieval_min_score,
 )
 answerer = Answerer(
     retriever=retriever,

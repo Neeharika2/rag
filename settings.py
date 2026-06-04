@@ -22,6 +22,16 @@ def _get_env_bool(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _get_env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
 @dataclass
 class Settings:
     chroma_path: str
@@ -39,6 +49,8 @@ class Settings:
     tesseract_cmd: Optional[str]
     rewrite_query_by_default: bool
     log_level: str
+    retrieval_min_score: float
+    dedupe_similarity_threshold: float
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -59,6 +71,8 @@ class Settings:
             tesseract_cmd=os.getenv("TESSERACT_CMD"),
             rewrite_query_by_default=_get_env_bool("REWRITE_QUERY_BY_DEFAULT", False),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
+            retrieval_min_score=_get_env_float("RETRIEVAL_MIN_SCORE", 0.25),
+            dedupe_similarity_threshold=_get_env_float("DEDUPE_SIMILARITY_THRESHOLD", 0.95),
         )
 
     def ensure_dirs(self) -> None:

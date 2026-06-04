@@ -1,3 +1,4 @@
+import json
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -16,6 +17,33 @@ class ChromaVectorStore:
             metadata={"hnsw:space": "cosine"},
         )
 
+    def _normalize_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = {}
+        for key, value in metadata.items():
+            if value is None:
+                continue
+            if isinstance(value, (str, int, float, bool)):
+                normalized[key] = value
+            elif isinstance(value, (dict, list, tuple, set)):
+                normalized[key] = json.dumps(value)
+            else:
+                normalized[key] = str(value)
+        return normalized
+
+    def _denormalize_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        denormalized = {}
+        for key, value in metadata.items():
+            if isinstance(value, str):
+                trimmed = value.strip()
+                if (trimmed.startswith("{") and trimmed.endswith("}")) or (trimmed.startswith("[") and trimmed.endswith("]")):
+                    try:
+                        denormalized[key] = json.loads(value)
+                        continue
+                    except Exception:
+                        pass
+            denormalized[key] = value
+        return denormalized
+
     def upsert(self, embeddings: List[List[float]], chunks: List[Chunk]) -> None:
         ids: List[str] = []
         metadatas: List[Dict[str, Any]] = []
@@ -32,7 +60,7 @@ class ChromaVectorStore:
                     "page_end": chunk.page_end,
                 }
             )
-            metadata = {key: value for key, value in metadata.items() if value is not None}
+            metadata = self._normalize_metadata(metadata)
             ids.append(chunk_id)
             metadatas.append(metadata)
             documents.append(chunk.text)
@@ -84,6 +112,7 @@ class ChromaVectorStore:
         hits: List[Dict[str, Any]] = []
         for idx, hit_id in enumerate(ids):
             metadata = metadatas[idx] or {}
+            metadata = self._denormalize_metadata(metadata)
             document = documents[idx] if idx < len(documents) else ""
             distance = distances[idx] if idx < len(distances) else None
             score = 1.0 - float(distance) if distance is not None else 0.0

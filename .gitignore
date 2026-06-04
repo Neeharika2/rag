@@ -19,3 +19,8 @@ chroma/
 # IDEs & Editors
 .vscode/
 .idea/
+
+updates/
+pdf_extracted.md 
+plan.md
+
