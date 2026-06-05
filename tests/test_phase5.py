@@ -225,7 +225,7 @@ class TestReasonerHiring:
     def test_tech_focus_intern(self) -> None:
         reasoner = StructuredReasoner(_sample_dataset())
         r = reasoner.answer("Which Python company hires the most interns?")
-        assert "TCS" in r.answer or "Google" in r.answer
+        assert "Infosys" in r.answer or "Google" in r.answer
 
 
 class TestReasonerTrends:
