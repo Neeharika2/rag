@@ -66,6 +66,7 @@ retriever = Retriever(
 answerer = Answerer(
     retriever=retriever,
     generator=generator,
+    metadata_store=metadata_store,
     query_rewriter=query_rewriter,
 )
 
@@ -234,15 +235,44 @@ class ProvenanceDetail(BaseModel):
 
 class Citation(BaseModel):
     chunk_id: str
-    doc_id: str
-    score: float
-    text: str
+    doc_id: Optional[str] = None
+    score: float = 0.0
+    text: str = ""
+    metadata: Dict[str, Any] = {}
     provenance: Optional[ProvenanceDetail] = None
 
 
 class AnswerResponse(BaseModel):
     answer: str
     citations: List[Citation]
+    route: str
+    confidence: float
+    fallback_reason: Optional[str] = None
+    evidence: Optional[List[Dict[str, Any]]] = None
+    warning: Optional[str] = None
+    detected_company: Optional[str] = None
+    detected_metric: Optional[str] = None
+    rewritten_query: Optional[str] = None
+
+
+class EvaluateRequest(BaseModel):
+    query: str
+    top_k: int = Field(default=8, ge=1, le=50)
+    filters: Optional[Dict[str, Any]] = None
+    rewrite: Optional[bool] = None
+
+
+class EvaluateResponse(BaseModel):
+    query: str
+    route: str
+    confidence: float
+    detected_company: Optional[str] = None
+    detected_metric: Optional[str] = None
+    fallback_reason: Optional[str] = None
+    answer: str
+    evidence: Optional[List[Dict[str, Any]]] = None
+    citations: List[Citation]
+    warning: Optional[str] = None
     rewritten_query: Optional[str] = None
 
 
@@ -305,7 +335,17 @@ def retrieve(request: RetrieveRequest) -> RetrieveResponse:
         filters=request.filters,
         original_query=request.query if should_rewrite else None,
     )
-    return RetrieveResponse(results=results, rewritten_query=rewritten_query)
+    hits: List[RetrievalHit] = [
+        RetrievalHit(
+            chunk_id=hit.get("chunk_id", hit.get("id", "")),
+            doc_id=hit.get("doc_id", ""),
+            score=hit.get("score", 0.0),
+            text=hit.get("text", ""),
+            metadata=hit.get("metadata", {}),
+        )
+        for hit in results
+    ]
+    return RetrieveResponse(results=hits, rewritten_query=rewritten_query)
 
 
 def _extract_provenance_from_metadata(metadata: Dict[str, Any]) -> Optional[ProvenanceDetail]:
@@ -328,28 +368,77 @@ def answer(request: AnswerRequest) -> AnswerResponse:
         else settings.rewrite_query_by_default
     )
 
-    answer_text, hits, rewritten_query = answerer.answer(
+    result = answerer.answer(
         query=request.query,
         top_k=request.top_k,
         filters=request.filters,
         rewrite=should_rewrite,
     )
     citations: List[Citation] = []
-    for hit in hits:
-        metadata = hit.get("metadata", {})
+    for c in result.citations:
+        metadata = c.metadata or {}
         citations.append(
             Citation(
-                chunk_id=hit.get("chunk_id", hit.get("id", "")),
-                doc_id=hit.get("doc_id", ""),
-                score=hit.get("score", 0.0),
-                text=hit.get("text", ""),
+                chunk_id=c.chunk_id,
+                doc_id=c.doc_id,
+                score=c.score,
+                text=c.text,
+                metadata=metadata,
                 provenance=_extract_provenance_from_metadata(metadata),
             )
         )
     return AnswerResponse(
-        answer=answer_text,
+        answer=result.answer,
         citations=citations,
-        rewritten_query=rewritten_query,
+        route=result.route,
+        confidence=result.confidence,
+        fallback_reason=result.fallback_reason,
+        evidence=result.evidence,
+        warning=result.warning,
+        detected_company=result.detected_company,
+        detected_metric=result.detected_metric,
+        rewritten_query=result.rewritten_query,
+    )
+
+
+@app.post("/placement/evaluate", response_model=EvaluateResponse)
+def placement_evaluate(request: EvaluateRequest) -> EvaluateResponse:
+    should_rewrite = (
+        request.rewrite
+        if request.rewrite is not None
+        else settings.rewrite_query_by_default
+    )
+    result = answerer.answer(
+        query=request.query,
+        top_k=request.top_k,
+        filters=request.filters,
+        rewrite=should_rewrite,
+    )
+    citations: List[Citation] = []
+    for c in result.citations:
+        metadata = c.metadata or {}
+        citations.append(
+            Citation(
+                chunk_id=c.chunk_id,
+                doc_id=c.doc_id,
+                score=c.score,
+                text=c.text,
+                metadata=metadata,
+                provenance=_extract_provenance_from_metadata(metadata),
+            )
+        )
+    return EvaluateResponse(
+        query=request.query,
+        route=result.route,
+        confidence=result.confidence,
+        detected_company=result.detected_company,
+        detected_metric=result.detected_metric,
+        fallback_reason=result.fallback_reason,
+        answer=result.answer,
+        evidence=result.evidence,
+        citations=citations,
+        warning=result.warning,
+        rewritten_query=result.rewritten_query,
     )
 
 

@@ -72,7 +72,7 @@ def detect_fallback(query: str) -> Tuple[Optional[str], Optional[str]]:
         return None, None
     q = query.lower().strip()
     for pattern, reason in OUT_OF_CORPUS_PATTERNS:
-        if re.search(pattern, q):
+        if re.search(pattern, q, re.IGNORECASE):
             return reason, FALLBACK_MESSAGES.get(reason, _generic_fallback(q))
     return None, None
 
