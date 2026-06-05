@@ -78,9 +78,11 @@ class StructuredReasoner:
             return self._answer_hiring_query, {"query": query, "company": company}
         if re.search(r"\b(ratio|package[- ]?to[- ]?cgpa)\b", q):
             return self._answer_stats_query, {"query": query, "company": company}
+        if re.search(r"\b(average|avg|offers?|overall|statistics?)\b", q):
+            return self._answer_stats_query, {"query": query, "company": company}
         if re.search(r"\b(cgpa|backlogs?|bonds?|eligibility|packages?|lpa|salary|ctc|min(imum)?\s*cgpa|tech[_ ]?focus|python|java|c\+\+)\b", q):
             return self._answer_eligibility_query, {"query": query, "company": company}
-        if re.search(r"\b(statistic|average|avg|compar(e|ison)|ranking|best|highest)\b", q):
+        if re.search(r"\b(compar(e|ison)|ranking|best|highest)\b", q):
             return self._answer_stats_query, {"query": query, "company": company}
         return None, {}
 

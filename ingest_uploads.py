@@ -62,9 +62,13 @@ def main() -> None:
         print(f"No supported files found in {settings.upload_dir}")
         return
 
+    import sys
+    re_ingest = "--re-ingest" in sys.argv
+    skip_if_exists = not re_ingest
+
     summary: Dict[str, int] = {"ingested": 0, "skipped": 0}
     for asset_path in assets:
-        result = pipeline.ingest_file(asset_path, skip_if_exists=True)
+        result = pipeline.ingest_file(asset_path, skip_if_exists=skip_if_exists, re_ingest=re_ingest)
         if result.get("skipped"):
             summary["skipped"] += 1
             print(f"Skipped: {os.path.basename(asset_path)}")

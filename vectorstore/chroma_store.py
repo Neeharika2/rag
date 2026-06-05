@@ -97,14 +97,18 @@ class ChromaVectorStore:
         if not filters:
             return None
 
-        where: Dict[str, Any] = {}
+        conditions = []
         for key, value in filters.items():
             if isinstance(value, list):
-                where[key] = {"$in": value}
+                conditions.append({key: {"$in": value}})
             else:
-                where[key] = value
+                conditions.append({key: value})
 
-        return where or None
+        if not conditions:
+            return None
+        if len(conditions) == 1:
+            return conditions[0]
+        return {"$and": conditions}
 
     def delete_by_doc_id(self, doc_id: str) -> None:
         results = self._collection.get(where={"doc_id": doc_id})

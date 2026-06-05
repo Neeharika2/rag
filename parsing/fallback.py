@@ -110,6 +110,13 @@ class ParserFallbackStrategy:
             return strategy
 
         if mime == "application/pdf":
+            if "placement" in file_path.lower() or "placement" in os.path.basename(file_path).lower():
+                strategy["use_ocr"] = False
+                strategy["skip_docling"] = False
+                strategy["prefer_pypdf"] = False
+                strategy["reason"] = "Placement PDF; forcing Docling to preserve table structures"
+                return strategy
+
             if self.ocr_enabled and is_text_only_pdf(file_path):
                 strategy["use_ocr"] = False
                 strategy["skip_docling"] = True

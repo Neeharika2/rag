@@ -297,24 +297,21 @@ def _split_sections(text: str) -> Dict[str, str]:
 def _parse_table_rows(text: str) -> List[List[str]]:
     lines = text.split("\n")
     rows: List[List[str]] = []
-    in_table = False
 
     for line in lines:
         stripped = line.strip()
         if not stripped:
-            in_table = False
             continue
-        if stripped.startswith("|") and stripped.endswith("|"):
-            in_table = True
-            cells = [c.strip() for c in stripped.split("|")[1:-1]]
-            if not cells:
-                continue
+        if "|" in stripped:
             if re.match(r"^[\s\-:|+]+\s*$", stripped):
                 continue
-            rows.append(cells)
-        elif in_table and "|" in stripped:
             cells = [c.strip() for c in stripped.split("|")]
-            rows.append(cells)
+            if stripped.startswith("|") and cells:
+                cells = cells[1:]
+            if stripped.endswith("|") and cells:
+                cells = cells[:-1]
+            if cells:
+                rows.append(cells)
 
     if not rows:
         rows = _parse_fallback_table(text)
@@ -334,8 +331,10 @@ def _parse_fallback_table(text: str) -> List[List[str]]:
 
 
 def _split_interview_companies(text: str) -> List[Tuple[str, str]]:
+    from placement.query_router import COMPANIES
+    escaped_companies = "|".join(re.escape(c) for c in COMPANIES)
     company_pattern = re.compile(
-        r"(?:(?:^|\n)(?:##+\s*|(?:\d+\.)?\s*)\*{0,2}({companies})\*{0,2})",
+        fr"(?:(?:^|\n)(?:##+\s*(?:[n■]\s*)?|(?:\d+\.)?\s*|■\s*)\*{{0,2}}({escaped_companies})\*{{0,2}})",
         re.IGNORECASE | re.MULTILINE,
     )
     blocks: List[Tuple[str, str]] = []
