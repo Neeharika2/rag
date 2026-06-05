@@ -9,6 +9,7 @@ from embeddings.base import EmbeddingProvider
 from ingestion.metadata_store import MetadataStore
 from parsing.base import DocumentParser
 from parsing.structured_log import ParseEvent, track_parse
+from placement.chunker import PlacementChunker
 from placement.extractor import extract_all
 from vectorstore.chroma_store import ChromaVectorStore
 
@@ -44,9 +45,15 @@ class IngestionPipeline:
         doc_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         skip_if_exists: bool = True,
+        re_ingest: bool = False,
     ) -> Dict[str, Any]:
         doc_id = doc_id or os.path.splitext(os.path.basename(file_path))[0]
         metadata = metadata or {}
+
+        if re_ingest and self._metadata_store.has_document(doc_id):
+            logger.info("Re-ingesting %s (clearing existing data)", doc_id)
+            self._vector_store.delete_by_doc_id(doc_id)
+            self._metadata_store.delete_placement_data(doc_id)
 
         if skip_if_exists and self._metadata_store.has_document(doc_id):
             logger.info("Skipping %s (already exists)", doc_id)
@@ -70,6 +77,7 @@ class IngestionPipeline:
             chunks = self._chunker.chunk_pages(doc_id, parsed.pages, base_metadata)
 
         is_placement = self._is_placement_pdf(doc_id, file_path)
+        dataset = None
 
         if is_placement and parsed.raw_markdown:
             try:
@@ -81,6 +89,23 @@ class IngestionPipeline:
                 base_metadata["trend_count"] = len(dataset.placement_trends)
                 base_metadata["conflict_count"] = len(dataset.conflict_records)
                 base_metadata["stats_count"] = len(dataset.overall_stats)
+
+                placement_chunker = PlacementChunker(
+                    doc_id=doc_id,
+                    source=os.path.basename(file_path),
+                    base_metadata=base_metadata,
+                    dedupe_threshold=0.95,
+                )
+                placement_chunks = placement_chunker.chunk_dataset(dataset)
+                if placement_chunks:
+                    chunks = placement_chunks
+                    logger.info(
+                        "Using %d placement-specific chunks instead of %d generic chunks",
+                        len(placement_chunks), len(chunks),
+                    )
+                else:
+                    logger.warning("Placement chunker returned 0 chunks; keeping generic chunks")
+
                 logger.info(
                     "Placement dataset extracted: %d eligibility, %d hiring, %d interviews, "
                     "%d trends, %d conflicts, %d stats",
@@ -92,10 +117,8 @@ class IngestionPipeline:
                     len(dataset.overall_stats),
                 )
             except Exception as exc:
-                logger.error("Placement extraction failed for %s: %s", doc_id, exc)
+                logger.error("Placement extraction/chunking failed for %s: %s", doc_id, exc)
                 dataset = None
-        else:
-            dataset = None
 
         if not chunks:
             self._metadata_store.upsert_document(
@@ -129,6 +152,7 @@ class IngestionPipeline:
 
         if dataset is not None:
             self._metadata_store.upsert_placement_dataset(doc_id, dataset)
+            self._metadata_store.persist_placement_tables(doc_id, dataset)
 
         self._log_ingestion(doc_id, parsed.raw_markdown, chunks)
 

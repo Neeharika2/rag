@@ -8,7 +8,19 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from chunking.recursive import Chunk as TextChunk
-from ingestion.models import Base, Chunk, Document, QueryLog, RetrievalHit
+from ingestion.models import (
+    Base,
+    Chunk,
+    ConflictRecord as ConflictTable,
+    Document,
+    EligibilityRecord,
+    HiringRecord,
+    InterviewRecord,
+    QueryLog,
+    RetrievalHit,
+    StatsRecord,
+    TrendRecord,
+)
 from placement.models import PlacementDataset
 
 logger = logging.getLogger(__name__)
@@ -132,3 +144,117 @@ class MetadataStore:
             if data is None:
                 return None
             return PlacementDataset.model_validate(data)
+
+    def persist_placement_tables(self, doc_id: str, dataset: PlacementDataset) -> None:
+        with self._session_factory() as session:
+            self._delete_placement_rows(session, doc_id)
+
+            for p in dataset.eligibility_profiles:
+                session.add(EligibilityRecord(
+                    doc_id=doc_id, company=p.company, min_cgpa=p.min_cgpa,
+                    max_backlogs=p.max_backlogs, package_lpa=p.package_lpa,
+                    bond_years=p.bond_years, key_topics=p.key_topics,
+                    tech_focus=p.tech_focus, source_type=p.source_type,
+                    page_number=p.page_number,
+                ))
+            for h in dataset.hiring_distributions:
+                session.add(HiringRecord(
+                    doc_id=doc_id, company=h.company, sde=h.sde,
+                    analyst=h.analyst, officer=h.officer, intern=h.intern,
+                    total=h.total, source_type=h.source_type,
+                    page_number=h.page_number,
+                ))
+            for t in dataset.placement_trends:
+                session.add(TrendRecord(
+                    doc_id=doc_id, company=t.company,
+                    package_2021=t.package_2021, package_2022=t.package_2022,
+                    package_2023=t.package_2023, package_2024=t.package_2024,
+                    absolute_growth=t.absolute_growth_2021_2024,
+                    trend_label=t.trend_label, page_number=t.page_number,
+                ))
+            for c in dataset.conflict_records:
+                session.add(ConflictTable(
+                    doc_id=doc_id, company=c.company,
+                    official_cgpa=c.official_cgpa, portal_cgpa=c.portal_cgpa,
+                    official_package_lpa=c.official_package_lpa,
+                    portal_package_lpa=c.portal_package_lpa,
+                    cgpa_conflict=c.cgpa_conflict,
+                    package_conflict=c.package_conflict,
+                    page_number=c.page_number,
+                ))
+            for s in dataset.overall_stats:
+                session.add(StatsRecord(
+                    doc_id=doc_id, company=s.company,
+                    avg_package=s.avg_package, max_offers=s.max_offers,
+                    min_offers=s.min_offers,
+                    avg_cgpa_cutoff=s.avg_cgpa_cutoff,
+                    bond_free=s.bond_free, page_number=s.page_number,
+                ))
+            for iv in dataset.interview_experiences:
+                session.add(InterviewRecord(
+                    doc_id=doc_id, company=iv.company,
+                    round_number=iv.round_number, round_title=iv.round_title,
+                    technical_focus=iv.technical_focus, details=iv.details,
+                    tip=iv.tip, page_number=iv.page_number,
+                ))
+
+            session.commit()
+            logger.info("Persisted placement tables for doc_id=%s", doc_id)
+
+    def _delete_placement_rows(self, session, doc_id: str) -> None:
+        tables = [EligibilityRecord, HiringRecord, TrendRecord, ConflictTable, StatsRecord, InterviewRecord]
+        for table in tables:
+            session.query(table).filter(table.doc_id == doc_id).delete()
+
+    def delete_placement_data(self, doc_id: str) -> None:
+        with self._session_factory() as session:
+            self._delete_placement_rows(session, doc_id)
+            document = session.get(Document, doc_id)
+            if document is not None:
+                meta = json.loads(document.metadata_json or "{}")
+                meta.pop("placement_dataset", None)
+                document.metadata_json = json.dumps(meta)
+            session.commit()
+            logger.info("Deleted placement data for doc_id=%s", doc_id)
+
+    def list_eligibility_profiles(self, doc_id: Optional[str] = None) -> list:
+        with self._session_factory() as session:
+            q = session.query(EligibilityRecord)
+            if doc_id:
+                q = q.filter(EligibilityRecord.doc_id == doc_id)
+            return q.all()
+
+    def list_hiring_distributions(self, doc_id: Optional[str] = None) -> list:
+        with self._session_factory() as session:
+            q = session.query(HiringRecord)
+            if doc_id:
+                q = q.filter(HiringRecord.doc_id == doc_id)
+            return q.all()
+
+    def list_trends(self, doc_id: Optional[str] = None) -> list:
+        with self._session_factory() as session:
+            q = session.query(TrendRecord)
+            if doc_id:
+                q = q.filter(TrendRecord.doc_id == doc_id)
+            return q.all()
+
+    def list_conflicts(self, doc_id: Optional[str] = None) -> list:
+        with self._session_factory() as session:
+            q = session.query(ConflictTable)
+            if doc_id:
+                q = q.filter(ConflictTable.doc_id == doc_id)
+            return q.all()
+
+    def list_overall_stats(self, doc_id: Optional[str] = None) -> list:
+        with self._session_factory() as session:
+            q = session.query(StatsRecord)
+            if doc_id:
+                q = q.filter(StatsRecord.doc_id == doc_id)
+            return q.all()
+
+    def list_interviews(self, doc_id: Optional[str] = None) -> list:
+        with self._session_factory() as session:
+            q = session.query(InterviewRecord)
+            if doc_id:
+                q = q.filter(InterviewRecord.doc_id == doc_id)
+            return q.all()

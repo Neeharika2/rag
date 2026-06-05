@@ -1,10 +1,13 @@
 import json
+import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
 import chromadb
 
 from chunking.recursive import Chunk
+
+logger = logging.getLogger(__name__)
 
 
 class ChromaVectorStore:
@@ -102,6 +105,21 @@ class ChromaVectorStore:
                 where[key] = value
 
         return where or None
+
+    def delete_by_doc_id(self, doc_id: str) -> None:
+        results = self._collection.get(where={"doc_id": doc_id})
+        ids = results.get("ids", [])
+        if ids:
+            self._collection.delete(ids=ids)
+            logger.info("Deleted %d chunks for doc_id=%s", len(ids), doc_id)
+
+    def reset_collection(self) -> None:
+        self._client.delete_collection(self._collection.name)
+        self._collection = self._client.get_or_create_collection(
+            name=self._collection.name,
+            metadata={"hnsw:space": "cosine"},
+        )
+        logger.info("Reset collection: %s", self._collection.name)
 
     def _format_hits(self, result: Dict[str, Any]) -> List[Dict[str, Any]]:
         ids = (result.get("ids") or [[]])[0]
