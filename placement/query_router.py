@@ -1,5 +1,5 @@
 import re
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from placement.fallback import detect_fallback
 from placement.models import RoutedQuery
@@ -99,14 +99,54 @@ PACKAGE_KEYWORDS = [
     r"\bpay(ing|s)?\b",
 ]
 
-COMPANIES = [
-    "TCS", "Amazon", "Google", "Infosys", "Microsoft", "Intel", "IBM",
-    "Accenture", "Wipro", "Cognizant", "Capgemini", "HCL", "Tech Mahindra",
-    "Deloitte", "Flipkart", "Samsung", "L&T Infotech", "PayPal", "Oracle",
-    "Adobe", "Goldman Sachs", "JP Morgan", "Salesforce",
-]
+import logging
+logger = logging.getLogger(__name__)
 
-CONFLICT_COMPANIES = ["Amazon", "TCS"]
+_metadata_store = None
+
+def get_metadata_store():
+    global _metadata_store
+    if _metadata_store is None:
+        from settings import Settings
+        from ingestion.metadata_store import MetadataStore
+        settings = Settings.from_env()
+        _metadata_store = MetadataStore(settings.metadata_db_url)
+    return _metadata_store
+
+def get_dynamic_companies() -> List[str]:
+    try:
+        db = get_metadata_store()
+        dataset = db.get_latest_placement_dataset()
+        if dataset and dataset.eligibility_profiles:
+            return list({p.company for p in dataset.eligibility_profiles})
+    except Exception as exc:
+        logger.warning("Failed to load companies dynamically from DB: %s", exc)
+    
+    return [
+        "TCS", "Amazon", "Google", "Infosys", "Microsoft", "Intel", "IBM",
+        "Accenture", "Wipro", "Cognizant", "Capgemini", "HCL", "Tech Mahindra",
+        "Deloitte", "Flipkart", "Samsung", "L&T Infotech", "PayPal", "Oracle",
+        "Adobe", "Goldman Sachs", "JP Morgan", "Salesforce",
+    ]
+
+def get_dynamic_conflict_companies() -> List[str]:
+    try:
+        db = get_metadata_store()
+        dataset = db.get_latest_placement_dataset()
+        if dataset and dataset.conflict_records:
+            return list({c.company for c in dataset.conflict_records if c.cgpa_conflict or c.package_conflict})
+    except Exception as exc:
+        logger.warning("Failed to load conflict companies dynamically from DB: %s", exc)
+    
+    return ["Amazon", "TCS", "Google", "Infosys", "Microsoft"]
+
+def __getattr__(name: str) -> Any:
+    if name == "COMPANIES":
+        return get_dynamic_companies()
+    if name == "CONFLICT_COMPANIES":
+        return get_dynamic_conflict_companies()
+    raise AttributeError(f"module {__name__} has no attribute {name}")
+
 
 
 def route_query(query: str) -> RoutedQuery:
@@ -127,15 +167,17 @@ def route_query(query: str) -> RoutedQuery:
             fallback_reason=fallback_reason,
         )
 
-    detected_company = _detect_company(query)
+    detected_companies = _detect_companies(query)
+    detected_company = detected_companies[0] if detected_companies else None
     detected_metric = _detect_metric(query)
 
-    if _matches_any(query, CONFLICT_KEYWORDS) or detected_company in CONFLICT_COMPANIES and _mentions_value_pair(query):
+    if _matches_any(query, CONFLICT_KEYWORDS) or (any(c in get_dynamic_conflict_companies() for c in detected_companies) and _mentions_value_pair(query)):
         return RoutedQuery(
             query=query,
             route=ROUTE_CONFLICT,
             confidence=0.9,
             detected_company=detected_company,
+            detected_companies=detected_companies,
             detected_metric="conflict",
         )
 
@@ -145,6 +187,7 @@ def route_query(query: str) -> RoutedQuery:
             route=ROUTE_TREND,
             confidence=0.85,
             detected_company=detected_company,
+            detected_companies=detected_companies,
             detected_metric="trend",
         )
 
@@ -154,6 +197,7 @@ def route_query(query: str) -> RoutedQuery:
             route=ROUTE_INTERVIEW,
             confidence=0.85,
             detected_company=detected_company,
+            detected_companies=detected_companies,
             detected_metric="interview",
         )
 
@@ -164,6 +208,7 @@ def route_query(query: str) -> RoutedQuery:
             route=ROUTE_STRUCTURED,
             confidence=confidence,
             detected_company=detected_company,
+            detected_companies=detected_companies,
             detected_metric=detected_metric,
         )
 
@@ -172,6 +217,7 @@ def route_query(query: str) -> RoutedQuery:
         route=ROUTE_GENERIC,
         confidence=0.5,
         detected_company=detected_company,
+        detected_companies=detected_companies,
     )
 
 
@@ -183,12 +229,25 @@ def _matches_any(query: str, patterns: List[str]) -> bool:
     return False
 
 
-def _detect_company(query: str) -> Optional[str]:
+def _detect_companies(query: str) -> List[str]:
     q = query.lower()
-    for c in COMPANIES:
-        if c.lower() in q:
-            return c
-    return None
+    companies = get_dynamic_companies()
+    found = []
+    for c in sorted(companies, key=len, reverse=True):
+        if c == "Samsung R&D":
+            pattern = r"samsung\s+r\s*&\s*d"
+        elif c == "L&T Infotech":
+            pattern = r"l\s*&\s*t\s+infotech"
+        else:
+            pattern = r"\b" + re.escape(c.lower()) + r"\b"
+        if re.search(pattern, q):
+            found.append(c)
+    return found
+
+
+def _detect_company(query: str) -> Optional[str]:
+    companies = _detect_companies(query)
+    return companies[0] if companies else None
 
 
 def _detect_metric(query: str) -> Optional[str]:

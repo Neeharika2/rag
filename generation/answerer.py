@@ -116,6 +116,7 @@ class Answerer:
         reason = routed.fallback_reason or "out_of_corpus"
         message = get_fallback_message(reason)
         detected_company = routed.detected_company or self._detect_company_in_query(query)
+        detected_companies = routed.detected_companies if (routed and getattr(routed, "detected_companies", None)) else [detected_company] if detected_company else []
         return AnswerResult(
             answer=message,
             route=ROUTE_OUT_OF_CORPUS,
@@ -125,6 +126,7 @@ class Answerer:
             fallback_reason=reason,
             rewritten_query=rewritten_query,
             detected_company=detected_company,
+            detected_companies=detected_companies,
             detected_metric=routed.detected_metric,
         )
 
@@ -135,8 +137,9 @@ class Answerer:
         rewritten_query: Optional[str],
         dataset: PlacementDataset,
     ) -> AnswerResult:
-        reasoner = StructuredReasoner(dataset)
+        reasoner = StructuredReasoner(dataset, self._generator)
         reasoned = reasoner.answer(query)
+        detected_companies = routed.detected_companies if (routed and getattr(routed, "detected_companies", None)) else [routed.detected_company] if (routed and routed.detected_company) else []
         return AnswerResult(
             answer=reasoned.answer,
             route=reasoned.route or routed.route,
@@ -147,6 +150,7 @@ class Answerer:
             warning=reasoned.warning,
             rewritten_query=rewritten_query,
             detected_company=routed.detected_company,
+            detected_companies=detected_companies,
             detected_metric=routed.detected_metric,
         )
 
@@ -162,10 +166,12 @@ class Answerer:
         merged = self._merge_filters({"section": section}, routed, explicit_filters)
         search_query = rewritten_query or query
         hits = self._retrieve(search_query, top_k, merged, query)
+        detected_companies = routed.detected_companies if (routed and getattr(routed, "detected_companies", None)) else [routed.detected_company] if (routed and routed.detected_company) else []
 
         if not hits:
+            company_arg = routed.detected_companies if (routed and getattr(routed, "detected_companies", None)) else routed.detected_company
             return AnswerResult(
-                answer=self._no_section_data_message(section, routed.detected_company),
+                answer=self._no_section_data_message(section, company_arg),
                 route=routed.route,
                 confidence=0.4,
                 citations=[],
@@ -173,6 +179,7 @@ class Answerer:
                 fallback_reason=f"no_{section}_data",
                 rewritten_query=rewritten_query,
                 detected_company=routed.detected_company,
+                detected_companies=detected_companies,
                 detected_metric=routed.detected_metric,
             )
 
@@ -188,6 +195,7 @@ class Answerer:
                 citations=self._hits_to_citations(hits),
                 rewritten_query=rewritten_query,
                 detected_company=routed.detected_company,
+                detected_companies=detected_companies,
                 detected_metric=routed.detected_metric,
             )
 
@@ -199,6 +207,7 @@ class Answerer:
             evidence=None,
             rewritten_query=rewritten_query,
             detected_company=routed.detected_company,
+            detected_companies=detected_companies,
             detected_metric=routed.detected_metric,
         )
 
@@ -213,7 +222,8 @@ class Answerer:
         merged = self._merge_filters(None, routed, explicit_filters)
         search_query = rewritten_query or query
         hits = self._retrieve(search_query, top_k, merged, query)
-        detected_company = routed.detected_company or self._detect_company_in_query(query)
+        detected_company = routed.detected_company or self._detect_company_in_query(query) if routed else self._detect_company_in_query(query)
+        detected_companies = routed.detected_companies if (routed and getattr(routed, "detected_companies", None)) else [detected_company] if detected_company else []
 
         if not hits:
             return AnswerResult(
@@ -228,14 +238,15 @@ class Answerer:
                 fallback_reason="no_relevant_chunks",
                 rewritten_query=rewritten_query,
                 detected_company=detected_company,
-                detected_metric=routed.detected_metric,
+                detected_companies=detected_companies,
+                detected_metric=routed.detected_metric if routed else None,
             )
 
         prompt = self._build_prompt(query, hits)
         try:
             answer = self._generator.generate(prompt)
         except Exception as exc:
-            logger.error("Generation failed for %s: %s", routed.route, exc)
+            logger.error("Generation failed for %s: %s", routed.route if routed else ROUTE_GENERIC, exc)
             return AnswerResult(
                 answer=f"Failed to generate answer: {exc}",
                 route=ROUTE_GENERIC,
@@ -243,7 +254,8 @@ class Answerer:
                 citations=self._hits_to_citations(hits),
                 rewritten_query=rewritten_query,
                 detected_company=detected_company,
-                detected_metric=routed.detected_metric,
+                detected_companies=detected_companies,
+                detected_metric=routed.detected_metric if routed else None,
             )
 
         confidence = min(0.9, max(0.5, hits[0]["score"])) if hits else 0.5
@@ -255,7 +267,8 @@ class Answerer:
             evidence=None,
             rewritten_query=rewritten_query,
             detected_company=detected_company,
-            detected_metric=routed.detected_metric,
+            detected_companies=detected_companies,
+            detected_metric=routed.detected_metric if routed else None,
         )
 
     def _merge_filters(
@@ -269,6 +282,12 @@ class Answerer:
             merged.update(section_filter)
         if explicit_filters:
             merged.update(explicit_filters)
+        elif routed and getattr(routed, "detected_companies", None) and "company" not in merged:
+            companies = routed.detected_companies
+            if len(companies) == 1:
+                merged["company"] = companies[0]
+            elif len(companies) > 1:
+                merged["company"] = companies
         elif routed and routed.detected_company and "company" not in merged:
             merged["company"] = routed.detected_company
         return merged or None
@@ -356,8 +375,11 @@ class Answerer:
             )
         return citations
 
-    def _no_section_data_message(self, section: str, company: Optional[str]) -> str:
-        target = f" for {company}" if company else ""
+    def _no_section_data_message(self, section: str, company_info: Optional[Any]) -> str:
+        if isinstance(company_info, list):
+            target = f" for {', '.join(company_info)}" if company_info else ""
+        else:
+            target = f" for {company_info}" if company_info else ""
         return (
             f"No {section} data is available{target} in the provided placement documents. "
             f"Try a broader question or ask about a different company."

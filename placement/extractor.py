@@ -32,13 +32,14 @@ EXPECTED_COUNTS = {
 }
 
 SECTION_ANCHORS: List[Tuple[str, re.Pattern]] = [
-    ("eligibility", re.compile(r"(?:section\s*1|eligibility(?:\s+table)?)\s*", re.IGNORECASE)),
-    ("interview", re.compile(r"(?:section\s*2|interview(?:\s+experience)?)\s*", re.IGNORECASE)),
-    ("hiring", re.compile(r"(?:section\s*3|hiring(?:\s+(?:chart|distribution|table))?)\s*", re.IGNORECASE)),
-    ("examples", re.compile(r"(?:section\s*4|multi[- ]?hop|worked\s+example|reasoning\s+example)\s*", re.IGNORECASE)),
-    ("trend", re.compile(r"(?:section\s*5|trend|temporal|package\s+trend|growth)\s*", re.IGNORECASE)),
-    ("conflict", re.compile(r"(?:section\s*6|conflict(?:ing)?|discrepancy)\s*", re.IGNORECASE)),
-    ("statistics", re.compile(r"(?:section\s*7|statistics|overall\s+stat|avg\s+package)\s*", re.IGNORECASE)),
+    ("eligibility", re.compile(r"(?:^|\n)[#\s]*Section\s*1\b", re.IGNORECASE)),
+    ("interview", re.compile(r"(?:^|\n)[#\s]*Section\s*2\b", re.IGNORECASE)),
+    ("hiring", re.compile(r"(?:^|\n)[#\s]*Section\s*3\b", re.IGNORECASE)),
+    ("examples", re.compile(r"(?:^|\n)[#\s]*Section\s*4\b", re.IGNORECASE)),
+    ("trend", re.compile(r"(?:^|\n)[#\s]*Section\s*5\b", re.IGNORECASE)),
+    ("conflict", re.compile(r"(?:^|\n)[#\s]*Section\s*6\b", re.IGNORECASE)),
+    ("statistics", re.compile(r"(?:^|\n)[#\s]*Section\s*7\b", re.IGNORECASE)),
+    ("evaluation_queries", re.compile(r"(?:^|\n)[#\s]*Section\s*[89]\b", re.IGNORECASE)),
 ]
 
 SECTION_END: re.Pattern = re.compile(r"(?:^|\n)(?=Section\s+\d|##+\s+Section)", re.IGNORECASE | re.MULTILINE)
@@ -59,7 +60,8 @@ def extract_all(text: str) -> PlacementDataset:
     sections = _split_sections(text)
 
     eligibility = extract_eligibility_profiles(sections.get("eligibility", ""))
-    interviews = extract_interview_experiences(sections.get("interview", ""))
+    companies_list = [p.company for p in eligibility]
+    interviews = extract_interview_experiences(sections.get("interview", ""), companies_list)
     hiring = extract_hiring_distribution(sections.get("hiring", ""))
     trends = extract_trends(sections.get("trend", ""))
     conflicts = extract_conflicts(sections.get("conflict", ""))
@@ -110,9 +112,9 @@ def extract_eligibility_profiles(text: str) -> List[EligibilityProfile]:
     return profiles
 
 
-def extract_interview_experiences(text: str) -> List[InterviewExperience]:
+def extract_interview_experiences(text: str, companies: Optional[List[str]] = None) -> List[InterviewExperience]:
     experiences: List[InterviewExperience] = []
-    company_blocks = _split_interview_companies(text)
+    company_blocks = _split_interview_companies(text, companies)
 
     for company, block in company_blocks:
         rounds = _parse_interview_rounds(block)
@@ -198,6 +200,8 @@ def extract_conflicts(text: str) -> List[ConflictRecord]:
     for row in rows:
         if len(row) < 4:
             continue
+        if _is_header_row(row):
+            continue
         company = _normalize_company(row[0])
         try:
             off_cgpa = _parse_float(row[1])
@@ -225,6 +229,8 @@ def extract_overall_stats(text: str) -> List[OverallStats]:
     stats_list: List[OverallStats] = []
     for row in rows:
         if len(row) < 4:
+            continue
+        if _is_header_row(row):
             continue
         company = _normalize_company(row[0])
         try:
@@ -330,9 +336,11 @@ def _parse_fallback_table(text: str) -> List[List[str]]:
     return potential_rows
 
 
-def _split_interview_companies(text: str) -> List[Tuple[str, str]]:
-    from placement.query_router import COMPANIES
-    escaped_companies = "|".join(re.escape(c) for c in COMPANIES)
+def _split_interview_companies(text: str, companies: Optional[List[str]] = None) -> List[Tuple[str, str]]:
+    if not companies:
+        from placement.query_router import COMPANIES
+        companies = COMPANIES
+    escaped_companies = "|".join(re.escape(c) for c in companies)
     company_pattern = re.compile(
         fr"(?:(?:^|\n)(?:##+\s*(?:[n■]\s*)?|(?:\d+\.)?\s*|■\s*)\*{{0,2}}({escaped_companies})\*{{0,2}})",
         re.IGNORECASE | re.MULTILINE,

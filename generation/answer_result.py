@@ -21,4 +21,5 @@ class AnswerResult(BaseModel):
     warning: Optional[str] = None
     rewritten_query: Optional[str] = None
     detected_company: Optional[str] = None
+    detected_companies: List[str] = []
     detected_metric: Optional[str] = None

@@ -15,15 +15,10 @@ from placement.models import (
 
 logger = logging.getLogger(__name__)
 
-IT_SERVICE_COMPANIES = [
-    "TCS", "Infosys", "Deloitte", "Accenture", "Wipro", "Cognizant",
-    "Capgemini", "HCL", "Tech Mahindra",
-]
-
-
 class StructuredReasoner:
-    def __init__(self, dataset: PlacementDataset) -> None:
+    def __init__(self, dataset: PlacementDataset, generator: Optional[Any] = None) -> None:
         self._dataset = dataset
+        self._generator = generator
         self._eligibility_index = {p.company: p for p in dataset.eligibility_profiles}
         self._hiring_index = {h.company: h for h in dataset.hiring_distributions}
         self._trend_index = {t.company: t for t in dataset.placement_trends}
@@ -151,8 +146,15 @@ class StructuredReasoner:
 
     def _parse_tech_focus(self, query: str) -> Optional[str]:
         q = query.lower()
-        techs = ["Python", "C++", "Java", "Cloud", "System Design", "Aptitude", "OOPs", "DBMS", "OS", "Algorithms"]
-        for t in techs:
+        techs = set()
+        for p in self._dataset.eligibility_profiles:
+            if p.tech_focus:
+                for t in re.split(r"[,/;&]|\band\b", p.tech_focus):
+                    cleaned = t.strip()
+                    if cleaned:
+                        techs.add(cleaned)
+        
+        for t in sorted(techs, key=len, reverse=True):
             if t == "C++":
                 pattern = r"\bc\+\+"
             else:
@@ -491,7 +493,7 @@ class StructuredReasoner:
             candidates = [p for p in candidates if tech_focus.lower() in p.tech_focus.lower()]
 
         if is_it_service:
-            service_set = set(IT_SERVICE_COMPANIES)
+            service_set = set(self._get_it_service_companies())
             candidates = [p for p in candidates if p.company in service_set]
 
         candidate_data = []
@@ -606,3 +608,31 @@ class StructuredReasoner:
             evidence=evidence,
             confidence=0.9,
         )
+
+    def _get_it_service_companies(self) -> List[str]:
+        companies = list({p.company for p in self._dataset.eligibility_profiles})
+        if self._generator:
+            prompt = (
+                f"Out of the following companies: {', '.join(companies)}, which ones are "
+                "primarily IT service firms/companies (as opposed to product development or engineering firms)? "
+                "Respond with ONLY a comma-separated list of the company names from the list. "
+                "Do not include any other text."
+            )
+            try:
+                res = self._generator.generate(prompt)
+                matched = []
+                for part in res.split(","):
+                    name = part.strip()
+                    for c in companies:
+                        if name.lower() == c.lower():
+                            matched.append(c)
+                if matched:
+                    return matched
+            except Exception as exc:
+                logger.warning("LLM classification of IT service companies failed: %s", exc)
+                
+        # Safe fallback list if LLM is unavailable or fails
+        return [c for c in companies if c.lower() in {
+            "tcs", "infosys", "deloitte", "accenture", "wipro", "cognizant",
+            "capgemini", "hcl", "tech mahindra"
+        }]

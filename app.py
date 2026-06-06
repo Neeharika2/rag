@@ -251,6 +251,7 @@ class AnswerResponse(BaseModel):
     evidence: Optional[List[Dict[str, Any]]] = None
     warning: Optional[str] = None
     detected_company: Optional[str] = None
+    detected_companies: List[str] = []
     detected_metric: Optional[str] = None
     rewritten_query: Optional[str] = None
 
@@ -267,6 +268,7 @@ class EvaluateResponse(BaseModel):
     route: str
     confidence: float
     detected_company: Optional[str] = None
+    detected_companies: List[str] = []
     detected_metric: Optional[str] = None
     fallback_reason: Optional[str] = None
     answer: str
@@ -396,6 +398,7 @@ def answer(request: AnswerRequest) -> AnswerResponse:
         evidence=result.evidence,
         warning=result.warning,
         detected_company=result.detected_company,
+        detected_companies=result.detected_companies,
         detected_metric=result.detected_metric,
         rewritten_query=result.rewritten_query,
     )
@@ -432,6 +435,7 @@ def placement_evaluate(request: EvaluateRequest) -> EvaluateResponse:
         route=result.route,
         confidence=result.confidence,
         detected_company=result.detected_company,
+        detected_companies=result.detected_companies,
         detected_metric=result.detected_metric,
         fallback_reason=result.fallback_reason,
         answer=result.answer,

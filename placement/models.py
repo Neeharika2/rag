@@ -92,6 +92,7 @@ class RoutedQuery(BaseModel):
     route: str
     confidence: float
     detected_company: Optional[str] = None
+    detected_companies: List[str] = []
     detected_metric: Optional[str] = None
     fallback_reason: Optional[str] = None
 
