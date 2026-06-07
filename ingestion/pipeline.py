@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from chunking.recursive import RecursiveChunker
 from embeddings.base import EmbeddingProvider
@@ -14,8 +14,6 @@ from placement.extractor import extract_all
 from vectorstore.chroma_store import ChromaVectorStore
 
 logger = logging.getLogger(__name__)
-
-PLACEMENT_PDF_PREFIXES = ("placement", "Placement_RAG", "placement_rag")
 
 
 def utc_now() -> str:
@@ -31,6 +29,7 @@ class IngestionPipeline:
         vector_store: ChromaVectorStore,
         metadata_store: MetadataStore,
         log_dir: Optional[str] = None,
+        placement_filename_prefixes: Optional[List[str]] = None,
     ) -> None:
         self._parser = parser
         self._chunker = chunker
@@ -38,6 +37,11 @@ class IngestionPipeline:
         self._vector_store = vector_store
         self._metadata_store = metadata_store
         self._log_dir = log_dir
+        self._placement_prefixes: List[str] = (
+            placement_filename_prefixes
+            if placement_filename_prefixes is not None
+            else ["placement", "placement_rag"]
+        )
 
     def ingest_file(
         self,
@@ -167,16 +171,22 @@ class IngestionPipeline:
             "source": os.path.basename(file_path),
         }
 
-    @staticmethod
-    def _is_placement_pdf(doc_id: str, file_path: str) -> bool:
+    def _is_placement_pdf(self, doc_id: str, file_path: str) -> bool:
+        """Return True if this file should trigger placement-specific extraction.
+
+        Detection is based on the filename/doc_id matching one of the
+        configured prefixes (case-insensitive). Override the default list via
+        the ``PLACEMENT_FILENAME_PREFIXES`` env var in Settings.
+        """
         name = os.path.basename(file_path)
         lower_name = name.lower()
         lower_id = doc_id.lower()
-        for prefix in PLACEMENT_PDF_PREFIXES:
-            if lower_name.startswith(prefix.lower()) or lower_id.startswith(prefix.lower()):
+        for prefix in self._placement_prefixes:
+            p = prefix.lower()
+            if lower_name.startswith(p) or lower_id.startswith(p):
                 return True
-        if "placement" in lower_name or "placement" in lower_id:
-            return True
+            if p in lower_name or p in lower_id:
+                return True
         return False
 
     def _log_ingestion(self, doc_id: str, markdown: str, chunks) -> None:

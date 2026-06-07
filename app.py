@@ -77,6 +77,7 @@ pipeline = IngestionPipeline(
     vector_store=vector_store,
     metadata_store=metadata_store,
     log_dir=settings.log_dir,
+    placement_filename_prefixes=settings.placement_filename_prefixes,
 )
 
 app = FastAPI(title="AI Core RAG Foundation")

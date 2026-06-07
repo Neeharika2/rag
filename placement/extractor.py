@@ -74,6 +74,7 @@ def extract_all(text: str) -> PlacementDataset:
         placement_trends=trends,
         overall_stats=stats,
         conflict_records=conflicts,
+        raw_sections=sections,
     )
 
     _validate_counts(dataset)
@@ -366,7 +367,7 @@ def _parse_interview_rounds(block: str) -> List[Dict]:
         r"(?:Round\s*(\d+)|Technical\s*Round|HR\s*Round|Managerial\s*Round)",
         re.IGNORECASE,
     )
-    tip_pattern = re.compile(r"(?:Tip|Advice|Suggestion)\s*:?\s*(.*)", re.IGNORECASE)
+    tip_pattern = re.compile(r"^[^\w]*(?:Tip|Advice|Suggestion)\s*:?\s*(.*)", re.IGNORECASE)
     lines = block.split("\n")
     rounds: List[Dict] = []
     current_round: Optional[Dict] = None

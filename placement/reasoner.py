@@ -56,7 +56,8 @@ class StructuredReasoner:
         is_trend = bool(re.search(r"\b(growth|grew|grown|year[- ]over[- ]year|2021.*2024|absolute\s+growth|max(imum)?\s+growth)\b", q))
         is_comparison = bool(re.search(r"\bcompar(e|ison)|versus|vs|contrast\b", q))
         is_ratio = bool(re.search(r"\b(ratio|package[- ]?to[- ]?cgpa)\b", q))
-        is_stats = bool(re.search(r"\b(average|avg|offers?|overall|statistics?)\b", q))
+        is_offers_noun = bool(re.search(r"\boffers\b", q)) and not bool(re.search(r"\b(?:company|who|which|that)\s+offers\b|\boffers\s+(?:a|the|to|package|salary|job)\b", q))
+        is_stats = bool(re.search(r"\b(average|avg|overall|statistics?)\b", q)) or is_offers_noun
 
         try:
             if is_conflict:
@@ -117,9 +118,20 @@ class StructuredReasoner:
         m = re.search(r"cgpa\s*(?:below|less\s+than|lower\s+than|<)\s*(\d+\.?\d*)", q)
         if m:
             return "<", float(m.group(1))
+        m = re.search(r"cgpa\s*(?:requirement|cutoff|criteria|limit)?\s*(?:is|at)\s*(\d+\.?\d*)", q)
+        if m:
+            return "==", float(m.group(1))
+        m = re.search(r"(?:requirement|cutoff|criteria)\s*(?:of|is|at)?\s*(\d+\.?\d*)", q)
+        if m and "cgpa" in q:
+            return "==", float(m.group(1))
+            
         m = re.search(r"(?:i\s+have|student\s+with|with)?\s*(?:a\s+)?cgpa\s*(?:of)?\s*(\d+\.?\d*)(?:\+)?", q)
         if m:
             val = float(m.group(1))
+            if "+" in m.group(0) or "8.0+" in q or "cgpa >= 8.0" in q:
+                return "<=", val
+            if "requirement" in q or "cutoff" in q or "criteria" in q:
+                return "==", val
             return "<=", val
         return None
 
@@ -192,6 +204,8 @@ class StructuredReasoner:
             sort_field = "growth"
         elif re.search(r"\bratio\b", q):
             sort_field = "ratio"
+        elif re.search(r"\b(cgpa|gpa|cutoff|requirement)\b", q):
+            sort_field = "cgpa"
 
         if re.search(r"\b(highest|maximum|max|best|most)\b", q):
             is_ranking = True
@@ -229,13 +243,40 @@ class StructuredReasoner:
                     warning=warning,
                 )
 
-        conflicted = [c for c in self._dataset.conflict_records if c.cgpa_conflict or c.package_conflict]
-        if conflicted:
-            names = ", ".join(c.company for c in conflicted)
+        conflicted = [c for c in self._dataset.conflict_records]
+        if self._generator and conflicted:
+            records_str = "\n".join([
+                f"Company: {c.company} | Official CGPA: {c.official_cgpa}, Portal CGPA: {c.portal_cgpa} | "
+                f"Official Package: {c.official_package_lpa} LPA, Portal Package: {c.portal_package_lpa} LPA | "
+                f"CGPA Conflict: {c.cgpa_conflict}, Package Conflict: {c.package_conflict}"
+                for c in conflicted
+            ])
+            prompt = (
+                "You are an assistant analyzing placement dataset conflicts. "
+                "Based ONLY on the conflict records below, answer the user's question. "
+                "Be precise and direct.\n\n"
+                f"Conflict Records:\n{records_str}\n\n"
+                f"Question: {query}\n\n"
+                "Answer:"
+            )
+            try:
+                ans = self._generator.generate(prompt)
+                return ReasonedAnswer(
+                    answer=ans,
+                    route="conflict_check",
+                    evidence=[c.model_dump() for c in conflicted],
+                    confidence=0.95,
+                )
+            except Exception as exc:
+                logger.warning("Failed to generate answer for conflict: %s", exc)
+
+        conflicted_filtered = [c for c in conflicted if c.cgpa_conflict or c.package_conflict]
+        if conflicted_filtered:
+            names = ", ".join(c.company for c in conflicted_filtered)
             return ReasonedAnswer(
                 answer=f"Companies with conflicting records: {names}.",
                 route="conflict_check",
-                evidence=[c.model_dump() for c in conflicted],
+                evidence=[c.model_dump() for c in conflicted_filtered],
                 confidence=0.95,
             )
         return ReasonedAnswer(
@@ -254,6 +295,29 @@ class StructuredReasoner:
         if not companies:
             companies = self._extract_companies(query)
         if len(companies) < 2:
+            if len(companies) == 1 and len(hiring_roles) >= 2:
+                c = companies[0]
+                h = self._hiring_index.get(c)
+                if h:
+                    role_counts = {r: getattr(h, r, 0) for r in hiring_roles}
+                    parts = [f"{r.upper()} ({role_counts[r]})" for r in hiring_roles]
+                    ans = f"For {c}, the hiring comparison shows: " + " vs ".join(parts) + f" (Total: {h.total})."
+                    if len(hiring_roles) == 2:
+                        r1, r2 = hiring_roles[0], hiring_roles[1]
+                        v1, v2 = role_counts[r1], role_counts[r2]
+                        diff = abs(v1 - v2)
+                        if v1 > v2:
+                            ans += f" It hires {diff} more {r1.upper()}s than {r2.upper()}s."
+                        elif v1 < v2:
+                            ans += f" It hires {diff} fewer {r1.upper()}s than {r2.upper()}s."
+                        else:
+                            ans += f" It hires the same number of {r1.upper()}s and {r2.upper()}s."
+                    return ReasonedAnswer(
+                        answer=ans,
+                        route="structured_query",
+                        evidence=[h.model_dump()],
+                        confidence=0.95,
+                    )
             return ReasonedAnswer(
                 answer="Please specify at least two companies to compare.",
                 route="structured_query",
@@ -458,7 +522,7 @@ class StructuredReasoner:
             p = self._eligibility_index.get(c_name)
             if p:
                 h = self._hiring_index.get(c_name)
-                h_text = f" Hiring SDE: {h.sde}, Analyst: {h.analyst}, Intern: {h.intern}." if h else ""
+                h_text = f" Hiring SDE: {h.sde}, Analyst: {h.analyst}, Officer: {h.officer}, Intern: {h.intern}. Total hires: {h.total}." if h else ""
                 return ReasonedAnswer(
                     answer=(
                         f"{c_name} eligibility: minimum CGPA {p.min_cgpa}, "
@@ -481,6 +545,8 @@ class StructuredReasoner:
                 candidates = [p for p in candidates if p.min_cgpa < val]
             elif op == "<=":
                 candidates = [p for p in candidates if p.min_cgpa <= val]
+            elif op == "==":
+                candidates = [p for p in candidates if p.min_cgpa == val]
 
         if backlog_filter:
             op, val = backlog_filter
@@ -537,6 +603,8 @@ class StructuredReasoner:
             sort_key_field = "growth"
         elif sort_field == "ratio":
             sort_key_field = "ratio"
+        elif sort_field == "cgpa":
+            sort_key_field = "min_cgpa"
         elif hiring_roles:
             sort_key_field = hiring_roles[0]
 
@@ -560,21 +628,38 @@ class StructuredReasoner:
 
         evidence = [x["profile"] for x in candidate_data]
 
-        if is_ranking and not ("rank" in q or "list" in q):
+        if is_ranking and not ("rank" in q or "list" in q or "companies" in q or "which ones" in q):
             top = candidate_data[0]
-            if hiring_roles:
-                role = hiring_roles[0]
-                val = top.get(role, 0)
-                ans = f"{top['company']} hires the most {role.upper()}s among matching companies with {val} positions."
-            elif sort_field == "growth":
-                ans = f"{top['company']} has the highest package growth with +{top['growth']} LPA."
+            top_val = top.get(sort_key_field, 0)
+            ties = [x for x in candidate_data if x.get(sort_key_field, 0) == top_val]
+            
+            if len(ties) > 1:
+                companies_str = " and ".join([f"{x['company']}" for x in ties])
+                if hiring_roles:
+                    role = hiring_roles[0]
+                    ans = f"{companies_str} hire the most {role.upper()}s among matching companies with {top_val} positions."
+                elif sort_field == "growth":
+                    ans = f"{companies_str} have the highest package growth with +{top_val} LPA."
+                elif sort_field == "cgpa":
+                    ans = f"{companies_str} have the highest CGPA requirement at {top_val}."
+                else:
+                    ans = f"{companies_str} offer the highest package at {top_val} LPA."
             else:
-                ans = f"{top['company']} offers the highest package at {top['package_lpa']} LPA."
+                if hiring_roles:
+                    role = hiring_roles[0]
+                    val = top.get(role, 0)
+                    ans = f"{top['company']} hires the most {role.upper()}s among matching companies with {val} positions."
+                elif sort_field == "growth":
+                    ans = f"{top['company']} has the highest package growth with +{top['growth']} LPA."
+                elif sort_field == "cgpa":
+                    ans = f"{top['company']} has the highest CGPA requirement at {top['min_cgpa']}."
+                else:
+                    ans = f"{top['company']} offers the highest package at {top['package_lpa']} LPA."
 
             return ReasonedAnswer(
                 answer=ans,
                 route="structured_query",
-                evidence=[top["profile"]],
+                evidence=[x["profile"] for x in ties],
                 confidence=0.95,
             )
 

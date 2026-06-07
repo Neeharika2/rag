@@ -56,6 +56,12 @@ class PlacementChunker:
         interview_chunks = self._deduplicate_interviews(interview_chunks)
         chunks.extend(interview_chunks)
 
+        # Chunk other sections
+        if dataset.raw_sections:
+            for sec_name, sec_text in dataset.raw_sections.items():
+                if sec_name in {"examples", "evaluation_queries", "conflict", "hiring", "trend", "unknown"}:
+                    chunks.extend(self._chunk_raw_section(sec_name, sec_text))
+
         logger.info(
             "PlacementChunker: %d total chunks (%d eligibility, %d hiring, "
             "%d trends, %d conflicts, %d stats, %d interviews after dedup)",
@@ -67,6 +73,37 @@ class PlacementChunker:
             len(dataset.overall_stats),
             len(interview_chunks),
         )
+        return chunks
+
+    def _chunk_raw_section(self, name: str, text: str) -> List[Chunk]:
+        paragraphs = text.split("\n\n")
+        chunks = []
+        current_block = ""
+        
+        for p in paragraphs:
+            p = p.strip()
+            if not p:
+                continue
+            if len(self._encoder.encode(current_block + "\n\n" + p)) <= 300:
+                current_block = (current_block + "\n\n" + p).strip()
+            else:
+                if current_block:
+                    meta = {
+                        "content_type": "raw_section",
+                        "section_name": name,
+                        "source_type": "text",
+                    }
+                    chunks.append(self._make_chunk(current_block, name, meta))
+                current_block = p
+                
+        if current_block:
+            meta = {
+                "content_type": "raw_section",
+                "section_name": name,
+                "source_type": "text",
+            }
+            chunks.append(self._make_chunk(current_block, name, meta))
+            
         return chunks
 
     def _make_chunk(

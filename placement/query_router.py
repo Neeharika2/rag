@@ -149,6 +149,21 @@ def __getattr__(name: str) -> Any:
 
 
 
+GENERIC_BYPASS_KEYWORDS = [
+    r"\breasoning\s+chain\b",
+    r"\breasoning\s+scenario\b",
+    r"\bstep-by-step\b",
+    r"\bchunking\s+strategy\b",
+    r"\bevaluation\s+query\b",
+    r"\bevaluation\s+queries\b",
+    r"\badversarial\b",
+    r"\bexpected\s+(?:RAG\s+)?response\b",
+    r"\bexpected\s+behavior\b",
+    r"\bout-of-corpus\b",
+    r"\bhow\s+to\s+chunk\b",
+]
+
+
 def route_query(query: str) -> RoutedQuery:
     if not query or not query.strip():
         return RoutedQuery(
@@ -165,6 +180,15 @@ def route_query(query: str) -> RoutedQuery:
             route=ROUTE_OUT_OF_CORPUS,
             confidence=0.95,
             fallback_reason=fallback_reason,
+        )
+
+    if _matches_any(query, GENERIC_BYPASS_KEYWORDS):
+        return RoutedQuery(
+            query=query,
+            route=ROUTE_GENERIC,
+            confidence=0.9,
+            detected_company=_detect_company(query),
+            detected_companies=_detect_companies(query),
         )
 
     detected_companies = _detect_companies(query)

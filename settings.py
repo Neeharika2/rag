@@ -1,6 +1,6 @@
 import os
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 from dotenv import load_dotenv
 
@@ -51,6 +51,7 @@ class Settings:
     log_level: str
     retrieval_min_score: float
     dedupe_similarity_threshold: float
+    placement_filename_prefixes: List[str]
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -73,6 +74,14 @@ class Settings:
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             retrieval_min_score=_get_env_float("RETRIEVAL_MIN_SCORE", 0.25),
             dedupe_similarity_threshold=_get_env_float("DEDUPE_SIMILARITY_THRESHOLD", 0.95),
+            placement_filename_prefixes=[
+                p.strip()
+                for p in os.getenv(
+                    "PLACEMENT_FILENAME_PREFIXES",
+                    "placement,Placement_RAG,placement_rag",
+                ).split(",")
+                if p.strip()
+            ],
         )
 
     def ensure_dirs(self) -> None:

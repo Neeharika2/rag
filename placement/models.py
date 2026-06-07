@@ -1,4 +1,4 @@
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -76,6 +76,7 @@ class PlacementDataset(BaseModel):
     placement_trends: List[PlacementTrend]
     conflict_records: List[ConflictRecord]
     overall_stats: List[OverallStats]
+    raw_sections: Optional[Dict[str, str]] = None
 
 
 class StructuredEvidence(BaseModel):

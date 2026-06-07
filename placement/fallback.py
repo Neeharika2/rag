@@ -37,24 +37,24 @@ OUT_OF_CORPUS_PATTERNS = [
 FALLBACK_MESSAGES = {
     "campus_visit_date": (
         "I don't have information about campus visit dates in the provided "
-        "placement documents. Please contact the official placement cell for scheduling details."
+        "documents. Please contact the relevant authority for scheduling details."
     ),
     "stock_price": (
         "Current stock price is real-time market data and is not available in the "
-        "placement documents. Please check a financial data provider for live stock information."
+        "provided documents. Please check a financial data provider for live stock information."
     ),
     "wfh_policy": (
-        "Work-from-home policy is not specified in the provided placement documents. "
+        "Work-from-home policy is not specified in the provided documents. "
         "Policies vary by team, project, and current company policy."
     ),
     "global_scope": (
-        "The provided placement documents cover only the companies listed in this dataset. "
+        "The provided documents cover only the companies listed in this dataset. "
         "I can identify the highest-paying company in this dataset, but cannot compare against "
         "global market data."
     ),
     "institution_scope": (
-        "Placement data for other institutions is not in the provided documents. "
-        "This dataset covers placement information for the specific institution in the source PDF."
+        "Data for other institutions is not in the provided documents. "
+        "This dataset covers information specific to the source documents."
     ),
     "subjective_choice": (
         "The documents do not define one company as universally better. I can compare "
@@ -83,8 +83,8 @@ def get_fallback_message(reason: str) -> str:
 
 def _generic_fallback(query: str) -> str:
     return (
-        "I don't have enough information in the provided placement documents to answer that. "
-        "Please rephrase your question or ask about specific eligibility, hiring, package, or interview topics."
+        "I don't have enough information in the provided documents to answer that. "
+        "Please rephrase your question or ask about topics covered in the uploaded documents."
     )
 
 
