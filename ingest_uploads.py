@@ -48,6 +48,19 @@ def main() -> None:
         chunk_overlap=settings.chunk_overlap,
     )
 
+    figure_enricher = None
+    if settings.vision_enabled:
+        from vision.enricher import FigureEnricher
+        figure_enricher = FigureEnricher(
+            api_key=settings.gemini_api_key,
+            model_name=settings.vision_model,
+            min_area_px=settings.vision_min_area_px,
+        )
+        print(
+            f"Vision enrichment enabled "
+            f"(model={settings.vision_model}, min_area_px={settings.vision_min_area_px})"
+        )
+
     pipeline = IngestionPipeline(
         parser=parser,
         chunker=chunker,
@@ -55,6 +68,7 @@ def main() -> None:
         vector_store=vector_store,
         metadata_store=metadata_store,
         log_dir=settings.log_dir,
+        figure_enricher=figure_enricher,
     )
 
     assets = _list_assets(settings.upload_dir)

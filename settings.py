@@ -52,6 +52,9 @@ class Settings:
     retrieval_min_score: float
     dedupe_similarity_threshold: float
     placement_filename_prefixes: List[str]
+    vision_enabled: bool
+    vision_min_area_px: int
+    vision_model: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -82,6 +85,9 @@ class Settings:
                 ).split(",")
                 if p.strip()
             ],
+            vision_enabled=_get_env_bool("VISION_ENABLED", False),
+            vision_min_area_px=_get_env_int("VISION_MIN_AREA_PX", 5000),
+            vision_model=os.getenv("VISION_MODEL") or os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
         )
 
     def ensure_dirs(self) -> None:

@@ -18,6 +18,7 @@ google-generativeai
 flashrank
 pillow
 pytesseract
+pymupdf
 tiktoken
 rapidfuzz
 pandas

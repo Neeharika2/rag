@@ -5,6 +5,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from parsing.models import PageContent
 
+_FIGURE_DESCRIPTION_HEADER = "[FIGURE_DESCRIPTION]"
+
 
 @dataclass
 class Chunk:
@@ -29,7 +31,20 @@ class RecursiveChunker:
         doc_id: str,
         pages: Iterable[PageContent],
         base_metadata: Dict[str, Any],
+        image_descriptions: Optional[Dict[int, List[str]]] = None,
     ) -> List[Chunk]:
+        """
+        Split *pages* into overlapping token-bounded chunks.
+
+        Parameters
+        ----------
+        image_descriptions:
+            Optional mapping of ``page_number → [description_str, ...]``
+            produced by :class:`~vision.enricher.FigureEnricher`.  When
+            provided the descriptions for a page are appended as a
+            ``[FIGURE_DESCRIPTION]`` block to the **first** chunk produced
+            from that page and stored in ``chunk.metadata["image_descriptions"]``.
+        """
         chunks: List[Chunk] = []
         chunk_index = 0
 
@@ -40,7 +55,13 @@ class RecursiveChunker:
 
             split_chunks = self._split_text(text)
             split_chunks = self._apply_overlap(split_chunks)
-            for part in split_chunks:
+
+            # Collect figure descriptions for this page (if any)
+            page_descs: List[str] = []
+            if image_descriptions and page.page_number is not None:
+                page_descs = image_descriptions.get(page.page_number, [])
+
+            for part_index, part in enumerate(split_chunks):
                 chunk_id = f"{doc_id}_chunk_{chunk_index}_{uuid.uuid4().hex[:8]}"
                 metadata = dict(base_metadata)
                 if page.page_number is not None:
@@ -85,11 +106,21 @@ class RecursiveChunker:
                         ]
                     metadata["provenance"] = provenance_dict
 
+                # Append figure descriptions to the first chunk of the page
+                # only, to avoid repeating them across overlap-split chunks.
+                chunk_text = part
+                if part_index == 0 and page_descs:
+                    desc_block = "\n\n".join(
+                        f"{_FIGURE_DESCRIPTION_HEADER}\n{d}" for d in page_descs
+                    )
+                    chunk_text = chunk_text + "\n\n" + desc_block
+                    metadata["image_descriptions"] = page_descs
+
                 chunks.append(
                     Chunk(
                         chunk_id=chunk_id,
                         doc_id=doc_id,
-                        text=part,
+                        text=chunk_text,
                         page_start=page.page_number,
                         page_end=page.page_number,
                         metadata=metadata,

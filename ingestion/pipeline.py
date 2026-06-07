@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from chunking.recursive import RecursiveChunker
 from embeddings.base import EmbeddingProvider
@@ -12,6 +12,9 @@ from parsing.structured_log import ParseEvent, track_parse
 from placement.chunker import PlacementChunker
 from placement.extractor import extract_all
 from vectorstore.chroma_store import ChromaVectorStore
+
+if TYPE_CHECKING:
+    from vision.enricher import FigureEnricher
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +33,7 @@ class IngestionPipeline:
         metadata_store: MetadataStore,
         log_dir: Optional[str] = None,
         placement_filename_prefixes: Optional[List[str]] = None,
+        figure_enricher: Optional["FigureEnricher"] = None,
     ) -> None:
         self._parser = parser
         self._chunker = chunker
@@ -42,6 +46,7 @@ class IngestionPipeline:
             if placement_filename_prefixes is not None
             else ["placement", "placement_rag"]
         )
+        self._figure_enricher = figure_enricher
 
     def ingest_file(
         self,
@@ -78,7 +83,28 @@ class IngestionPipeline:
 
         with track_parse(doc_id, file_path, "ingestion_pipeline"):
             parsed = self._parser.parse(file_path, doc_id)
-            chunks = self._chunker.chunk_pages(doc_id, parsed.pages, base_metadata)
+
+        # --- Vision enrichment (optional, PDF-only) ----------------------
+        image_descriptions = None
+        if self._figure_enricher is not None and file_path.lower().endswith(".pdf"):
+            try:
+                image_descriptions = self._figure_enricher.enrich(file_path, parsed)
+                if image_descriptions:
+                    total = sum(len(v) for v in image_descriptions.values())
+                    logger.info(
+                        "Vision enrichment produced %d description(s) for %s",
+                        total, doc_id,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Vision enrichment failed for %s — continuing without: %s",
+                    doc_id, exc,
+                )
+
+        chunks = self._chunker.chunk_pages(
+            doc_id, parsed.pages, base_metadata,
+            image_descriptions=image_descriptions,
+        )
 
         is_placement = self._is_placement_pdf(doc_id, file_path)
         dataset = None
