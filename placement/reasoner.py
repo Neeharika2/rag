@@ -192,6 +192,35 @@ class StructuredReasoner:
             roles.append("intern")
         return roles
 
+    def _is_hiring_distribution_query(self, query: str) -> bool:
+        """Return True when the query is *primarily* about role-wise hiring
+        numbers (Section 3), not about eligibility or package data.
+
+        The check mirrors the DISTRIBUTION_KEYWORDS list in query_router so
+        that the reasoner and the router stay in sync without a hard import.
+        """
+        q = query.lower()
+        distribution_signals = [
+            r"\bdistribution\b",
+            r"\bby\s+role\b",
+            r"\brole[- ]?wise\b",
+            r"\bhiring\s+break\s*down\b",
+            r"\bhiring\s+breakdown\b",
+            r"\bhow\s+many\s+(?:sde|analyst|officer|intern)\b",
+            r"\btotal\s+hires?\b",
+            r"\bnumber\s+of\s+(?:sde|analyst|officer|intern|hires?)\b",
+            r"\bwho\s+hires\s+(?:most|more)\b",
+            r"\bmost\s+(?:sde|analyst|officer|intern)\b",
+        ]
+        for pattern in distribution_signals:
+            if re.search(pattern, q, re.IGNORECASE):
+                return True
+        # Also treat it as hiring-distribution if the query mentions a role
+        # keyword without any eligibility/package signal.
+        has_role = bool(re.search(r"\b(sde|analyst|officer|intern|hires?)\b", q))
+        has_eligibility = bool(re.search(r"\b(cgpa|gpa|backlog|bond|eligible|package|lpa|salary)\b", q))
+        return has_role and not has_eligibility
+
     def _parse_rank_sort(self, query: str) -> Tuple[bool, Optional[str], Optional[str]]:
         q = query.lower()
         is_ranking = bool(re.search(r"\brank\b|\blist\b|\bcompar(e|ison)\b", q))
@@ -520,9 +549,33 @@ class StructuredReasoner:
         if companies and not has_other_filters:
             c_name = companies[0]
             p = self._eligibility_index.get(c_name)
+            h = self._hiring_index.get(c_name)
+
+            # --- Pure hiring-distribution query ---
+            # Return role counts as the primary answer with the hiring record
+            # as evidence so citations point to the correct data source.
+            if self._is_hiring_distribution_query(query) and h:
+                role_lines = (
+                    f"SDE: {h.sde}, Analyst: {h.analyst}, "
+                    f"Officer: {h.officer}, Intern: {h.intern}"
+                )
+                return ReasonedAnswer(
+                    answer=(
+                        f"{c_name} hiring distribution by role — "
+                        f"{role_lines}. Total hires: {h.total}."
+                    ),
+                    route="structured_query",
+                    evidence=[h.model_dump()],
+                    confidence=0.98,
+                )
+
+            # --- General single-company query (eligibility + optional hiring) ---
             if p:
-                h = self._hiring_index.get(c_name)
-                h_text = f" Hiring SDE: {h.sde}, Analyst: {h.analyst}, Officer: {h.officer}, Intern: {h.intern}. Total hires: {h.total}." if h else ""
+                h_text = (
+                    f" Hiring by role — SDE: {h.sde}, Analyst: {h.analyst}, "
+                    f"Officer: {h.officer}, Intern: {h.intern}. Total hires: {h.total}."
+                    if h else ""
+                )
                 return ReasonedAnswer(
                     answer=(
                         f"{c_name} eligibility: minimum CGPA {p.min_cgpa}, "

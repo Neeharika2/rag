@@ -26,6 +26,18 @@ logger = logging.getLogger(__name__)
 INTERVIEW_MAX_TOKENS = 300
 INTERVIEW_MIN_TOKENS = 100
 
+# ---------------------------------------------------------------------------
+# Chunk text templates
+# Each template uses a semantically distinct *opening phrase* so that the
+# embedding model places each chunk type in a separate region of vector space.
+# This prevents eligibility chunks from being retrieved for hiring queries
+# and vice-versa.
+# ---------------------------------------------------------------------------
+
+# Sections that are already fully covered by per-row structured chunks and
+# should NOT be redundantly indexed as raw markdown text.
+_RAW_SECTION_SKIP = {"hiring", "trend", "statistics"}
+
 
 class PlacementChunker:
     def __init__(
@@ -56,10 +68,11 @@ class PlacementChunker:
         interview_chunks = self._deduplicate_interviews(interview_chunks)
         chunks.extend(interview_chunks)
 
-        # Chunk other sections
+        # Chunk other sections — skip sections already fully covered by
+        # structured per-row chunks to avoid noisy duplicate retrieval.
         if dataset.raw_sections:
             for sec_name, sec_text in dataset.raw_sections.items():
-                if sec_name in {"examples", "evaluation_queries", "conflict", "hiring", "trend", "unknown"}:
+                if sec_name not in _RAW_SECTION_SKIP:
                     chunks.extend(self._chunk_raw_section(sec_name, sec_text))
 
         logger.info(
@@ -132,11 +145,13 @@ class PlacementChunker:
     def _chunk_eligibility(self, profiles: List[EligibilityProfile]) -> List[Chunk]:
         chunks: List[Chunk] = []
         for p in profiles:
+            # Prefix: "Eligibility criteria for <Company>" — semantically anchors
+            # this chunk to CGPA/backlog/bond/package eligibility queries.
             text = (
-                f"Company: {p.company}. Eligibility: minimum CGPA {p.min_cgpa}, "
-                f"maximum backlogs {p.max_backlogs}, package {p.package_lpa} LPA, "
-                f"bond {p.bond_years} years. Key topics: {p.key_topics}. "
-                f"Technical focus: {p.tech_focus}."
+                f"Eligibility criteria for {p.company}: "
+                f"minimum CGPA {p.min_cgpa}, maximum backlogs {p.max_backlogs}, "
+                f"package {p.package_lpa} LPA, bond {p.bond_years} years. "
+                f"Key topics: {p.key_topics}. Technical focus: {p.tech_focus}."
             )
             meta: Dict[str, Any] = {
                 "content_type": "structured_row",
@@ -156,10 +171,13 @@ class PlacementChunker:
     def _chunk_hiring(self, distributions: List[HiringDistribution]) -> List[Chunk]:
         chunks: List[Chunk] = []
         for d in distributions:
+            # Prefix: "Role-wise hiring distribution for <Company>" — semantically
+            # distinct from eligibility. Mentions all four roles explicitly so a
+            # single-chunk retrieval is sufficient to answer any role breakdown query.
             text = (
-                f"Company: {d.company}. Hiring distribution: "
-                f"{d.sde} SDE, {d.analyst} Analyst, {d.officer} Officer, "
-                f"{d.intern} Intern. Total: {d.total}."
+                f"Role-wise hiring distribution for {d.company}: "
+                f"SDE={d.sde}, Analyst={d.analyst}, Officer={d.officer}, Intern={d.intern}. "
+                f"Total hires: {d.total}."
             )
             meta: Dict[str, Any] = {
                 "content_type": "structured_row",
@@ -178,12 +196,13 @@ class PlacementChunker:
     def _chunk_trends(self, trends: List[PlacementTrend]) -> List[Chunk]:
         chunks: List[Chunk] = []
         for t in trends:
+            # Prefix: "Year-over-year package trend for <Company>" — semantically
+            # anchors this chunk to temporal/trend queries, not eligibility.
             text = (
-                f"Company: {t.company}. Package trend: "
-                f"2021: {t.package_2021} LPA, 2022: {t.package_2022} LPA, "
-                f"2023: {t.package_2023} LPA, 2024: {t.package_2024} LPA. "
-                f"Absolute growth (2021-2024): {t.absolute_growth_2021_2024} LPA. "
-                f"Trend: {t.trend_label}."
+                f"Year-over-year package trend for {t.company}: "
+                f"2021={t.package_2021} LPA, 2022={t.package_2022} LPA, "
+                f"2023={t.package_2023} LPA, 2024={t.package_2024} LPA. "
+                f"Absolute growth (2021→2024): {t.absolute_growth_2021_2024} LPA ({t.trend_label})."
             )
             meta: Dict[str, Any] = {
                 "content_type": "structured_row",
@@ -203,12 +222,13 @@ class PlacementChunker:
     def _chunk_conflicts(self, conflicts: List[ConflictRecord]) -> List[Chunk]:
         chunks: List[Chunk] = []
         for c in conflicts:
+            # Prefix: "Conflicting placement records for <Company>" — semantically
+            # anchors this to hallucination-detection / discrepancy queries.
             text = (
-                f"Company: {c.company}. There are conflicting records. "
-                f"Official criteria: {c.official_cgpa} CGPA, "
-                f"{c.official_package_lpa} LPA package. "
-                f"Portal records: {c.portal_cgpa} CGPA, "
-                f"{c.portal_package_lpa} LPA package."
+                f"Conflicting placement records for {c.company}: "
+                f"official CGPA cutoff {c.official_cgpa}, official package {c.official_package_lpa} LPA; "
+                f"portal CGPA {c.portal_cgpa}, portal package {c.portal_package_lpa} LPA. "
+                f"CGPA conflict: {c.cgpa_conflict}. Package conflict: {c.package_conflict}."
             )
             meta: Dict[str, Any] = {
                 "content_type": "structured_row",

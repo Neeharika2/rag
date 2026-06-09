@@ -5,6 +5,7 @@ from placement.fallback import detect_fallback
 from placement.models import RoutedQuery
 
 ROUTE_STRUCTURED = "structured_query"
+ROUTE_HIRING = "hiring_query"
 ROUTE_INTERVIEW = "interview_text"
 ROUTE_TREND = "trend_query"
 ROUTE_CONFLICT = "conflict_check"
@@ -12,7 +13,8 @@ ROUTE_OUT_OF_CORPUS = "out_of_corpus"
 ROUTE_GENERIC = "generic_vector"
 
 ROUTE_METADATA_KEYS = {
-    ROUTE_STRUCTURED: "section=eligibility/hiring/statistics",
+    ROUTE_STRUCTURED: "section=eligibility/statistics",
+    ROUTE_HIRING: "section=hiring",
     ROUTE_INTERVIEW: "section=interview",
     ROUTE_TREND: "section=trend",
     ROUTE_CONFLICT: "section=conflict",
@@ -88,6 +90,26 @@ HIRING_KEYWORDS = [
     r"\b(total|number\s+of)\s+(offers?|hires?)\b",
     r"\bmost\s+interns?\b",
     r"\bmost\s+SDEs?\b",
+]
+
+# Patterns that strongly signal a *role-distribution* intent — i.e. the user
+# wants to know HOW MANY people are hired per role, not eligibility details.
+# These trigger ROUTE_HIRING rather than the generic ROUTE_STRUCTURED.
+DISTRIBUTION_KEYWORDS = [
+    r"\bdistribution\b",
+    r"\bby\s+role\b",
+    r"\brole[- ]?wise\b",
+    r"\bhiring\s+break\s*down\b",
+    r"\bhiring\s+breakdown\b",
+    r"\bhow\s+many\s+(?:SDE|analyst|officer|intern)\b",
+    r"\bSDE\s+(?:count|number|hired|positions?)\b",
+    r"\banalyst\s+(?:count|number|hired|positions?)\b",
+    r"\bofficer\s+(?:count|number|hired|positions?)\b",
+    r"\bintern\s+(?:count|number|hired|positions?)\b",
+    r"\bnumber\s+of\s+(?:SDE|analyst|officer|intern|hires?)\b",
+    r"\btotal\s+hires?\b",
+    r"\bwho\s+hires\s+(?:most|more)\b",
+    r"\bmost\s+(?:SDE|analyst|officer|intern)\b",
 ]
 
 PACKAGE_KEYWORDS = [
@@ -223,6 +245,23 @@ def route_query(query: str) -> RoutedQuery:
             detected_company=detected_company,
             detected_companies=detected_companies,
             detected_metric="interview",
+        )
+
+    # --- Hiring distribution route (BEFORE generic structured) ---
+    # DISTRIBUTION_KEYWORDS are strong signals that the user wants role-count
+    # data from Section 3 of the PDF, not eligibility/package data.
+    if _matches_any(query, DISTRIBUTION_KEYWORDS) or (
+        _matches_any(query, HIRING_KEYWORDS)
+        and not _matches_any(query, CGPA_KEYWORDS)
+        and not _matches_any(query, PACKAGE_KEYWORDS)
+    ):
+        return RoutedQuery(
+            query=query,
+            route=ROUTE_HIRING,
+            confidence=0.88,
+            detected_company=detected_company,
+            detected_companies=detected_companies,
+            detected_metric="hiring",
         )
 
     if _matches_any(query, STATISTICS_KEYWORDS) or _matches_any(query, HIRING_KEYWORDS) or _matches_any(query, CGPA_KEYWORDS) or _matches_any(query, PACKAGE_KEYWORDS):

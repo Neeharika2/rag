@@ -9,6 +9,7 @@ from placement.models import PlacementDataset
 from placement.query_router import (
     ROUTE_CONFLICT,
     ROUTE_GENERIC,
+    ROUTE_HIRING,
     ROUTE_INTERVIEW,
     ROUTE_OUT_OF_CORPUS,
     ROUTE_STRUCTURED,
@@ -21,11 +22,15 @@ from retrieval.retriever import Retriever
 logger = logging.getLogger(__name__)
 
 
+# Maps each route to the Chroma metadata `section` value used for filtered
+# retrieval.  ROUTE_HIRING uses section=hiring to avoid pulling eligibility
+# chunks into hiring-distribution answers.
 _ROUTE_TO_SECTION = {
     ROUTE_INTERVIEW: "interview",
     ROUTE_TREND: "trend",
     ROUTE_CONFLICT: "conflict",
     ROUTE_STRUCTURED: "eligibility",
+    ROUTE_HIRING: "hiring",
 }
 
 
@@ -61,8 +66,22 @@ class Answerer:
             return self._handle_out_of_corpus(query, routed, rewritten_query)
 
         dataset = self._load_dataset()
+
+        # Structured routes: use in-memory index for exact, fast answers.
         if routed.route in (ROUTE_STRUCTURED, ROUTE_TREND, ROUTE_CONFLICT) and dataset is not None:
             return self._handle_structured(query, routed, rewritten_query, dataset)
+
+        # Hiring distribution: prefer in-memory structured reasoner; fall back
+        # to section-filtered vector retrieval when no dataset is available.
+        if routed.route == ROUTE_HIRING:
+            if dataset is not None:
+                return self._handle_structured(query, routed, rewritten_query, dataset)
+            return self._handle_narrative(
+                query, routed, rewritten_query,
+                top_k=top_k or self._narrative_top_k,
+                section=_ROUTE_TO_SECTION[ROUTE_HIRING],
+                explicit_filters=filters,
+            )
 
         if routed.route == ROUTE_INTERVIEW:
             return self._handle_narrative(
